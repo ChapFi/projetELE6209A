@@ -64,7 +64,7 @@ def calculate_relative_pose_2d(pose1, pose2):
     T1 = create_2d_pose_matrix(pose1[0,0], pose1[1,0], pose1[2,0])
     T2 = create_2d_pose_matrix(pose2[0,0], pose2[1,0], pose2[2,0])
     T1_inv = np.linalg.inv(T1)
-    relative_pose = np.dot(T1_inv, T2)
+    relative_pose = np.multiply(T1_inv, T2)
     return relative_pose
 
 def addODOM(graph, measure, from_node):
@@ -96,7 +96,6 @@ def add_measurements(graph, odometry_data, from_node):
         ey = measurement["y"] - lastpos[1]
         etheta = measurement["theta"] - lastpos[2]
         if ex >= 0.5 or ey >= 0.5 or etheta >= 0.5:
-            print("new add")
             _, current_node_id = addODOM(graph, measurement, previous_node_id)
             previous_node_id = current_node_id
     return True
@@ -105,50 +104,68 @@ def add_measurements(graph, odometry_data, from_node):
 def Graph_opti(initX, constraint, nbNode):
     tol = 10^-6
     xold = initX
-    xnew = 2*xold
+    xnew = np.multiply(xold, 2)
     maxIter = 100
     nbIter = 0
-    while np.norm(xnew-xold) > tol and nbIter < maxIter:
-        N = nbNode #TO DO checker les tailles
+    while np.linalg.norm(xnew-xold) > tol and nbIter < maxIter:
+        N = nbNode
         b = np.zeros((3*N,1))
         H = np.zeros((3*N,3*N))
         for from_node_id, to_node_id, relative_pose, W in constraint:
             i = from_node_id
             j = to_node_id
-            Xi = graph.get_node_pose(i)
-            Xj = graph.get_node_pose(j)
-            tij = np.array([[relative_pose[0]],[relative_pose[1]]])
-            thetaij = relative_pose[2]
-            Ri = np.array( [[np.cos(Xi[2]), -np.sin(Xi[2])],[np.sin(Xi[2]),np.cos(Xi[2])]])
-            dRi = np.array( [[-np.sin(Xi[2]), -np.cos(Xi[2])],[np.cos(Xi[2]),-np.sin(Xi[2])]])
-            Rij = np.array( [ [np.cos(Xj[2]), -np.sin(Xj[2])],[np.sin(Xj[2]),np.cos(Xj[2])]])
-            rijri = np.transpose(Rij)*np.transpose(Ri)
-            dri = np.transpose(Rij)*dRi*(Xj[0:1]-Xi[0:1])
-            A = np.array([[-rijri[0,0], -rijri[0,1] ,dri[0]], 
-                          [-rijri[1,0], -rijri[1,1], dri[1]], 
+
+            Xi = xold[3*i:3*i+3] #graph.get_node_pose(i)
+            Xj = xold[3*j:3*j+3] #graph.get_node_pose(j)
+            tij = np.array([[relative_pose[0,0]],[relative_pose[1,0]]])
+            thetaij = relative_pose[2,0]
+
+            Ri = np.array([[np.cos(Xi[2,0]), -np.sin(Xi[2,0])],
+                          [np.sin(Xi[2,0]),np.cos(Xi[2,0])]])
+            
+            dRi = np.array([[-np.sin(Xi[2,0]), -np.cos(Xi[2,0])],
+                           [np.cos(Xi[2,0]),-np.sin(Xi[2,0])]])
+            
+            Rij = np.array([[np.cos(thetaij), -np.sin(thetaij)]
+                           ,[np.sin(thetaij),np.cos(thetaij)]])
+            
+            rijri = np.matmul(np.transpose(Rij),np.transpose(Ri))
+
+            dri = np.matmul(np.matmul(np.transpose(Rij),np.transpose(dRi)), np.subtract(Xj[0:2],Xi[0:2]))
+
+            A = np.array([[-rijri[0,0], -rijri[0,1] ,dri[0,0]], 
+                          [-rijri[1,0], -rijri[1,1], dri[1,0]], 
                           [0, 0, -1]])
             B = np.array([[rijri[0,0], rijri[0,1], 0],
                         [rijri[1,0], rijri[1,1], 0],
-                        [0, 0, -1]])
-            H[i:i+3, i:i+3] += np.transpose(A)*W*A
-            H[i:i+3, j:j+3] += np.transpose(A)*W*B
-            H[j:j+3, i:i+3] += np.transpose(B)*W*A
-            H[j:j+3, j:j+3] += np.transpose(B)*W*B
+                        [0, 0, 1]])
+            
+            H[3*i:3*i+3, 3*i:3*i+3] = np.add(H[3*i:3*i+3, 3*i:3*i+3], np.matmul(np.matmul(np.transpose(A),W),A))
+            H[3*i:3*i+3, 3*j:3*j+3] = np.add(H[3*i:3*i+3, 3*j:3*j+3], np.matmul(np.matmul(np.transpose(A),W),B))
+            H[3*j:3*j+3, 3*i:3*i+3] = np.add(H[3*j:3*j+3, 3*i:3*i+3], np.matmul(np.matmul(np.transpose(B),W),A))
+            H[3*j:3*j+3, 3*j:3*j+3] = np.add(H[3*j:3*j+3, 3*j:3*j+3], np.matmul(np.matmul(np.transpose(B),W),B))
 
-            t = np.transpose(Rij)*(np.transpose(Ri)*(Xj[0:1]-Xi[0:1] - tij))
-            theta = Xj[2]-Xi[2]- thetaij
-            e = np.array([[t[0]],[t[1]],[theta]])
-            b[i:i+3] += np.transpose(A)*W*e
-            b[j:j+3] += np.transpose(B)*W*e
-        H[0:2, 0:2] += np.eye(2)
+            t = np.matmul( np.transpose(Rij), np.subtract(np.matmul(np.transpose(Ri),np.subtract(Xj[0:2],Xi[0:2])),tij))
+            theta =  normalize(Xj[2]-Xi[2]- thetaij)
+            e = np.array([[t[0,0]],[t[1,0]],[theta[0]]])
+
+            b[3*i:(3*i)+3] = np.add(b[3*i:(3*i)+3], np.matmul(np.matmul(np.transpose(A),W),e))
+            b[3*j:(3*j)+3] = np.add(b[3*j:(3*j)+3], np.matmul(np.matmul(np.transpose(B),W),e))
+
+        H[0:3, 0:3] = np.add(H[0:3, 0:3],np.eye(3))
+        #print(H)
         deltaX = spsolve(H, -b)
+        deltaX = np.reshape(deltaX, (3*N, 1))
         xold = xnew
-        xnew = xnew + deltaX
+        xnew = np.add(xnew,deltaX)
         nbIter += 1
     xopt = xnew
     Hopt = H
-    Hopt[0:2, 0:2] -= np.eye(2)
+    Hopt[0:3, 0:3] -= np.eye(3)
     return xopt , Hopt
+
+def normalize(angle):
+	return np.arctan2(np.sin(angle),np.cos(angle))
 
 def initGraph(startPos):
     graph = PosGraph.PoseGraph()
@@ -188,10 +205,24 @@ if __name__ == "__main__":
     x0 = np.array([[0],[0],[0]])
     graph, from_node = initGraph(x0)
     _ = add_measurements(graph, data["ODOM"][1:], from_node)
-    #graph.print_graph()
+    graph.print_graph()
     nbNodes = graph.get_number_of_nodes()
-    xstart = np.array
-    for _, node in enumerate(graph.nodes):
-        np.append(xstart, node)
+    xstart = np.empty((3*nbNodes, 1))
+    i = 0
+    for index, (id, node) in enumerate(graph.nodes.items()):
+        xstart[i] = node[0]
+        xstart[i+1] = node[1]
+        xstart[i+2] = node[2]
+        i += 3
     C = graph.edges
     x, H = Graph_opti(xstart, C, nbNodes)
+    x = np.reshape(x,(nbNodes,3))
+    x = np.multiply(x, 1)
+    #print(x)
+
+    fig, ax = plt.subplots()
+    plt.plot(x[:,0], x[:,1], '+')
+    xstart = np.reshape(xstart,(nbNodes,3))
+    
+    plt.plot(xstart[:,0], xstart[:,1], '-')
+    plt.show()
