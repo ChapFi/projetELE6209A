@@ -110,7 +110,7 @@ class GraphSLAM:
             # Solve the system using sparse Cholesky
             H_sparse = sp.csr_matrix(H)
             try:
-                dx = np.linalg.solve(H, -b)
+                dx = np.linalg.solve(H_sparse, -b)
             except np.linalg.LinAlgError:
                 print(f"Linear algebra error in iteration {iteration}")
                 lambda_factor *= 10

@@ -112,7 +112,7 @@ if __name__ == "__main__":
     graph = GraphSLAM()
     frontend = EnhancedFrontend(voxel_size=0.5, submap_size=10)
 
-    dataset = pykitti.odometry(basedir, sequence, frames=range(0, 100))
+    dataset = pykitti.odometry(basedir, sequence, frames=range(0, 4000, 100))
     graph, frontend = integrate_with_graphslam(dataset, graph, frontend=frontend)
 
     # Print initial poses before optimization
