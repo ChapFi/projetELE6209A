@@ -17,14 +17,13 @@ def clamp_angle(theta):
     return theta
 
 
-def to_center(ve):
+def to_center(ve, alpha):
     return ve/(1-np.tan(alpha)*H/L)
 
 
 L = 2.83  # Wheelbase
 H = 0.76
 b = 0.5
-alpha = 3.78 * np.pi/180
 GPS_file = "dataset/GPS.txt"
 odom_file = "dataset/DRS.txt"
 
@@ -36,20 +35,19 @@ odom_data = df.iloc[:, 1:].to_numpy()
 deltaT = np.diff(df.iloc[:, 0].to_numpy())
 
 num_steps = odom_data.shape[0]
-P = np.diag([.1, .1, 1])
 
 # EKF Dead Reckoning using Odometry
 ekf_states = np.zeros((num_steps, 3))  # EKF estimated states [x, y, theta]
 Q = np.diag([0.1, 0.1, np.radians(0.1)]) ** 2  # Process noise covariance
 for t in range(1, num_steps):
     v = odom_data[t, 0]
-    vc = to_center(v)
+    alpha = odom_data[t, 1]
+    vc = to_center(v, alpha)
     delta = deltaT[t-1]
-    theta = odom_data[t, 1]
-
+    theta = ekf_states[t-1, 2]
     deltax = delta * (vc * np.cos(theta))
     deltay = delta * (vc * np.sin(theta))
-    deltatheta = (vc / L) * np.tan(delta)
+    deltatheta = (vc / L) * np.tan(alpha)
 
     u = np.array([deltax, deltay, deltatheta])
 
@@ -64,7 +62,7 @@ for t in range(1, num_steps):
     R[1, 1] = 0.05**2
     R[2, 2] = 0.5*np.pi/180**2
 
-    new_cov = make_symmetric(G @ (P @ G.T) + F.T @ (R @ F))
+    new_cov = make_symmetric(G @ (Q @ G.T) + F.T @ (R @ F))
 
     # Prediction Step
     ekf_states[t, 0] = ekf_states[t - 1, 0] + deltax
@@ -72,10 +70,10 @@ for t in range(1, num_steps):
     ekf_states[t, 2] = clamp_angle(ekf_states[t - 1, 2] + deltatheta)
 
 
-    P = new_cov
+    Q = new_cov
 
 
-print(P)
+print(Q)
 # Plot trajectory and comparison
 plt.figure(figsize=(8, 6))
 plt.scatter(GPS_data[:, 0], GPS_data[:, 1], label='Truth (GPS)', s=1)
