@@ -21,9 +21,6 @@ def to_center(ve):
     return ve/(1-np.tan(alpha)*H/L)
 
 
-# Simulation parameters
-dt = 0.1  # Time step
-T = 50  # Total time in seconds
 L = 2.83  # Wheelbase
 H = 0.76
 b = 0.5
@@ -47,17 +44,17 @@ Q = np.diag([0.1, 0.1, np.radians(0.1)]) ** 2  # Process noise covariance
 for t in range(1, num_steps):
     v = odom_data[t, 0]
     vc = to_center(v)
-    delta = odom_data[t, 1]
-    theta = ekf_states[t - 1, 2]
+    delta = deltaT[t-1]
+    theta = odom_data[t, 1]
 
-    deltax = deltaT[t-1] * (vc * np.cos(theta))
-    deltay = deltaT[t-1] * (vc * np.sin(theta))
-    deltatheta = clamp_angle((vc / L) * np.tan(delta))
+    deltax = delta * (vc * np.cos(theta))
+    deltay = delta * (vc * np.sin(theta))
+    deltatheta = (vc / L) * np.tan(delta)
 
     u = np.array([deltax, deltay, deltatheta])
 
-    dx = -deltaT[t-1] * (vc * np.sin(theta))
-    dy = deltaT[t-1] * (vc * np.cos(theta))
+    dx = -delta * (vc * np.sin(theta))
+    dy = delta * (vc * np.cos(theta))
     F = np.eye(3)
 
     G = np.array([[1, 0, dx], [0, 1, dy], [0, 0, 1]])
@@ -70,19 +67,21 @@ for t in range(1, num_steps):
     new_cov = make_symmetric(G @ (P @ G.T) + F.T @ (R @ F))
 
     # Prediction Step
-    ekf_states[t, 0] = ekf_states[t - 1, 0] + deltaT[t-1] * (vc * np.cos(theta))
-    ekf_states[t, 1] = ekf_states[t - 1, 1] + deltaT[t-1] * (vc * np.sin(theta))
-    ekf_states[t, 2] = ekf_states[t - 1, 2] + (vc / L) * np.tan(delta) * deltaT[t-1]
+    ekf_states[t, 0] = ekf_states[t - 1, 0] + deltax
+    ekf_states[t, 1] = ekf_states[t - 1, 1] + deltay
+    ekf_states[t, 2] = clamp_angle(ekf_states[t - 1, 2] + deltatheta)
 
-    # Update covariance (no correction step since it's dead reckoning)
+
     P = new_cov
 
+
+print(P)
 # Plot trajectory and comparison
 plt.figure(figsize=(8, 6))
-plt.scatter(GPS_data[:, 0], GPS_data[:, 1], label='Truth', s=1)
+plt.scatter(GPS_data[:, 0], GPS_data[:, 1], label='Truth (GPS)', s=1)
 plt.xlabel('X Position (m)')
 plt.ylabel('Y Position (m)')
-plt.plot(ekf_states[:, 0], ekf_states[:, 1], label='EKF Dead Reckoning', linestyle='--')
+plt.plot(ekf_states[:, 0], ekf_states[:, 1], label='EKF Dead Reckoning', linestyle='--', color='r')
 plt.xlabel('X Position (m)')
 plt.ylabel('Y Position (m)')
 plt.legend()
