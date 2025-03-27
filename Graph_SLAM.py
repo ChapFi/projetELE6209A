@@ -3,6 +3,7 @@ import numpy as np
 import PosGraph
 from scipy.sparse.linalg import spsolve
 
+
 def getScan(filepath, numberofScan):
 
     data = {
