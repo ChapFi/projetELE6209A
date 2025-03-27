@@ -43,7 +43,7 @@ def integrate_with_graphslam(dataset, graph, num_frames=None, frontend=None):
     num_frames = len(dataset) if num_frames is None else min(num_frames, len(dataset))
 
     # Add initial pose to graph
-    graph.add_pose(0, np.array([0, 0, 0]))  # Start at origin
+    graph.add_pose(0, np.array([0, 0, 0]), None)  # Start at origin
 
     for i in range(1, num_frames):
         # Get LiDAR scan from dataset
@@ -59,22 +59,21 @@ def integrate_with_graphslam(dataset, graph, num_frames=None, frontend=None):
         idx = frontend.frame_count - 1
         two_d_pose = get_2d_pose(current_pose)
         print(f"Adding node {idx} with pose {two_d_pose}")
-        graph.add_pose(idx, two_d_pose)
+        graph.add_pose(idx, two_d_pose, current_scan)
 
         # Add odometry edge if we have constraints
         if constraints:
             prev_idx, curr_idx, transform, info_matrix, loop_info = constraints
 
             # Create edge with appropriate information matrix
-            odom_info = np.eye(3)  # Simple identity for odometry
             graph.add_edge(prev_idx, curr_idx, get_2d_pose(transform), info_matrix)
 
             # Add loop closure if detected
             if loop_info:
                 loop_from, loop_to, loop_transform, loop_info_matrix = loop_info
                 # Convert 6D info matrix to 3D and add higher weight
-                loop_info_3d = np.eye(3) * 10.0  # Higher weight for loop closures
-                graph.add_edge(loop_from, loop_to, get_2d_pose(loop_transform), loop_info_matrix)
+                loop_info_3d = np.eye(3) * 1000.0  # Higher weight for loop closures
+                graph.add_edge(loop_from, loop_to, get_2d_pose(loop_transform), loop_info_3d)
 
     return graph, frontend
 
@@ -117,7 +116,7 @@ if __name__ == "__main__":
 
     # Print initial poses before optimization
     print("Before optimization:")
-    initial_poses = graph.get_nodes()
+    initial_poses = graph.get_nodes()['pose']
 
     # Plot initial trajectory
     init_x, init_y = [], []

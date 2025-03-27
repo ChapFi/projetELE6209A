@@ -1,23 +1,10 @@
 import copy
 
 import numpy as np
-import scipy as sp
+import scipy.sparse
+from scipy.sparse import csr_matrix
+from scipy.sparse.linalg import spsolve
 
-
-def error(xi, xj, zij):
-    Ti = xi[:2]
-    Tj = xj[:2]
-    theta_i = xi[2]
-    theta_j = xj[2]
-    theta_ij = zij[2]
-    Zij_pos = zij[:2]
-
-    # Calculate rotation matrices
-    Ri = np.array(([np.cos(theta_i), -np.sin(theta_i)], [np.sin(theta_i), np.cos(theta_i)]))
-    Rij = np.array(([np.cos(theta_ij), -np.sin(theta_ij)], [np.sin(theta_ij), np.cos(theta_ij)]))
-
-    # This is the correct implementation per equation (30)
-    return np.concatenate((Rij.T @ (Ri @ (Tj - Ti) - Zij_pos), np.array([theta_j - theta_i - theta_ij])))
 
 class GraphSLAM:
     def __init__(self):
@@ -33,7 +20,6 @@ class GraphSLAM:
     def optimize(self, max_iterations=10, epsilon=1e-6):
         """Optimize the graph using Levenberg-Marquardt algorithm"""
         iteration = 0
-        lambda_factor = 1e-5
         converged = False
 
         while not converged and iteration < max_iterations:
@@ -43,21 +29,24 @@ class GraphSLAM:
             H = np.zeros((3 * num_nodes, 3 * num_nodes))
             b = np.zeros(3 * num_nodes)
 
-            # Compute total error before optimization
-            total_error = 0
-            for i, j, Zij, Omega in self.edges:
-                xi = self.nodes[i]
-                xj = self.nodes[j]
-                err = error(xi, xj, Zij)
-                total_error += err.T @ Omega @ err
-
             # For each constraint
-            for i, j, Zij, Omega in self.edges:
+            for i, j, zij, Omega in self.edges:
                 xi = self.nodes[i]
                 xj = self.nodes[j]
 
-                # Calculate error - simplified from your original code
-                e_ij = error(xi, xj, Zij)
+                Ti = xi[:2]
+                Tj = xj[:2]
+                theta_i = xi[2]
+                theta_j = xj[2]
+                theta_ij = zij[2]
+                Zij_pos = zij[:2]
+
+                # Calculate rotation matrices
+                Ri = np.array(([np.cos(theta_i), -np.sin(theta_i)], [np.sin(theta_i), np.cos(theta_i)]))
+                Rij = np.array(([np.cos(theta_ij), -np.sin(theta_ij)], [np.sin(theta_ij), np.cos(theta_ij)]))
+
+                # This is the correct implementation per equation (30)
+                e_ij = np.concatenate((Rij.T @ (Ri @ (Tj - Ti) - Zij_pos), np.array([theta_j - theta_i - theta_ij])))
 
                 # Calculate Jacobians according to equations (32) and (33)
                 Ti = xi[:2]
@@ -70,7 +59,6 @@ class GraphSLAM:
                     [np.sin(theta_i), np.cos(theta_i)]
                 ])
 
-                theta_ij = Zij[2]
                 Rij = np.array([
                     [np.cos(theta_ij), -np.sin(theta_ij)],
                     [np.sin(theta_ij), np.cos(theta_ij)]
@@ -108,12 +96,11 @@ class GraphSLAM:
             H[:3, :3] += np.eye(3) * 1e6
 
             # Solve the system using sparse Cholesky
-            H_sparse = sp.csr_matrix(H)
+            H_sparse = csr_matrix(H)
             try:
-                dx = np.linalg.solve(H_sparse, -b)
+                dx = spsolve(H_sparse, -b)
             except np.linalg.LinAlgError:
                 print(f"Linear algebra error in iteration {iteration}")
-                lambda_factor *= 10
                 continue
 
             # Make a copy of nodes for trial update
@@ -126,31 +113,7 @@ class GraphSLAM:
                 # Normalize angle
                 new_nodes[i][2] = np.arctan2(np.sin(new_nodes[i][2]), np.cos(new_nodes[i][2]))
 
-            # Compute error after update
-            new_error = 0
-            for i, j, Zij, Omega in self.edges:
-                xi = new_nodes[i]
-                xj = new_nodes[j]
-                err = error(xi, xj, Zij)
-                new_error += err.T @ Omega @ err
-
             self.nodes = new_nodes
-
-            # Accept or reject update based on error change
-            if new_error < total_error:
-                # Accept update, decrease lambda
-                lambda_factor /= 10
-
-                # Check for convergence
-                delta_norm = np.linalg.norm(dx)
-                print(
-                    f"Iteration {iteration}: error={new_error:.6f}, delta={delta_norm:.6f}, lambda={lambda_factor:.6f}")
-
-            else:
-                # Reject update, increase lambda
-                lambda_factor *= 10
-                print(f"Iteration {iteration}: rejected update, lambda={lambda_factor:.6f}")
-
             iteration += 1
 
     def get_nodes(self):

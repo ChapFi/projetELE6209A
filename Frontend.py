@@ -155,7 +155,7 @@ class EnhancedFrontend:
                 current_pcd, submap, init_transform, max_distance=1.0)
 
             # If good match, confirm loop closure
-            if fitness > 0.5 and rmse < 0.3:  # Thresholds to tune
+            if fitness > 0.5 and rmse < 0.5:  # Thresholds to tune
                 relative_pose = np.linalg.inv(submap_pose) @ transform @ current_pose
                 information = self.compute_information_matrix(current_pcd, submap, transform)
                 loop_closures.append((i, self.frame_count, relative_pose, information))
