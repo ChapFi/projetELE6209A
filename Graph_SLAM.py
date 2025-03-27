@@ -200,29 +200,58 @@ def displayMAP(data):
     plt.show()
     return pos
 
-if __name__ == "__main__": 
-    data = getScan("dataset/aces_dataset.txt", 7000)
-    x0 = np.array([[0],[0],[0]])
-    graph, from_node = initGraph(x0)
-    _ = add_measurements(graph, data["ODOM"][1:], from_node)
-    graph.print_graph()
+if __name__ == "__main__":
+
+    pose_array = []
+    edge_array = []
+
+    n = 3  # SE(3)
+
+    with open("input_INTEL_g2o.g2o", mode="r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.split()
+            if parts[0] == "VERTEX_SE2":
+                id_ = int(parts[1])
+                values = list(map(float, parts[2:]))
+                pose_array.append([id_, np.atleast_2d(values).T])
+            elif parts[0] == "EDGE_SE2":
+                id1 = int(parts[1])
+                id2 = int(parts[2])
+                transform = list(map(float, parts[3:6]))
+                information_matrix = list(map(float, parts[6:]))
+                triu0 = np.triu_indices(3, 0)
+                tril1 = np.tril_indices(3, -1)
+
+                mat = np.zeros((3, 3), dtype=np.float64)
+                mat[triu0] = information_matrix
+                mat[tril1] = mat.T[tril1]
+                edge_array.append([id1, id2, np.atleast_2d(transform).T, mat])
+
+    print(edge_array[0][2])
+    graph = PosGraph.PoseGraph()
+
+
+
+    for pose in pose_array:
+        graph.add_node(pose[1])
+
+    for edge in edge_array:
+        graph.add_edge(edge[0], edge[1], edge[2], edge[3])
+
     nbNodes = graph.get_number_of_nodes()
-    xstart = np.empty((3*nbNodes, 1))
+    xstart = np.empty((3 * nbNodes, 1))
     i = 0
     for index, (id, node) in enumerate(graph.nodes.items()):
         xstart[i] = node[0]
-        xstart[i+1] = node[1]
-        xstart[i+2] = node[2]
+        xstart[i + 1] = node[1]
+        xstart[i + 2] = node[2]
         i += 3
     C = graph.edges
     x, H = Graph_opti(xstart, C, nbNodes)
-    x = np.reshape(x,(nbNodes,3))
+    x = np.reshape(x, (nbNodes, 3))
     x = np.multiply(x, 1)
-    #print(x)
 
-    fig, ax = plt.subplots()
-    plt.plot(x[:,0], x[:,1], '+')
-    xstart = np.reshape(xstart,(nbNodes,3))
-    
-    plt.plot(xstart[:,0], xstart[:,1], '-')
+    plt.figure(figsize=(10, 5))
+    plt.plot(x[:,0], x[:,1], 'b-')
     plt.show()
+    plt.close()
