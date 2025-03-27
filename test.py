@@ -35,6 +35,7 @@ odom_data = df.iloc[:, 1:].to_numpy()
 deltaT = np.diff(df.iloc[:, 0].to_numpy())
 
 num_steps = odom_data.shape[0]
+P = np.eye(3) * 0.01  # Initial small uncertainty
 
 # EKF Dead Reckoning using Odometry
 ekf_states = np.zeros((num_steps, 3))  # EKF estimated states [x, y, theta]
@@ -76,7 +77,7 @@ for t in range(1, num_steps):
 print(Q)
 # Plot trajectory and comparison
 plt.figure(figsize=(8, 6))
-plt.scatter(GPS_data[:, 0], GPS_data[:, 1], label='Truth (GPS)', s=1)
+plt.scatter(GPS_data[:, 1], GPS_data[:, 0], label='Truth (GPS)', s=1)
 plt.xlabel('X Position (m)')
 plt.ylabel('Y Position (m)')
 plt.plot(ekf_states[:, 0], ekf_states[:, 1], label='EKF Dead Reckoning', linestyle='--', color='r')
