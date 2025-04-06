@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import linear_sum_assignment
+from Landmark import Landmark, Landmarks
 
 Trees = np.array([])
 currentTime = 0
@@ -254,13 +255,15 @@ def extendedKalman(state, u, sigma, measure, dt):
     newSigma = estSigma
     return newState, newSigma
 
-def updateEKF(state, sigma, measure):
+def updateEKF(state, sigma, measure: [Landmark]):
     # Only update state and covariance when getting laser measurement
     for landmark in measure:
         # From the pdf
-        # landmark should be (landmark id, r, theta)
+        # landmark should be (diameter, (centerX, centerY), r, theta)
         # landmark id should be the in the order they appeared
-        j, r, theta = landmark
+        # `add` return the place in the list if its exist else the new id which is the last landmark
+        j, out = landmarks.add(landmark)
+        r, theta = out.getDistance()
 
         if state[j:j+2] == np.zeros(2):
             state[j:j + 2] = state[0:2] + np.array([r*np.cos(theta + state[2]), r*np.sin(theta+state[2])])
@@ -346,10 +349,49 @@ def EKFSlam(rowOdom, rowLaser, sensorManager):
                     (h,k) = find_circle_center_least_squares(points) #obtain the center of the cluster
                     deltaB = dataRange[len(dataRange)-1][0]-dataRange[0][0]
                     diam = deltaB*sum([pair[1] for pair in dataRange])/len(dataRange) #obtain the diameter
-                    z.append((h, k, diam))
+                    angle, range = dataRange[(len(dataRange) - 1)//2] # take the mean in the dataRange to get the angle and range to the landmark
+                    landmark = Landmark(diam, (h, k), range, angle)
+                    z.append(landmark)
             
             #Use the EKF for estmation
             state, sigma = extendedKalman(state, u, sigma, z, dt)
+        elif sensor['sensor'] == 3:
+            index = int(sensor['index']) - 2
+            u = rowLaser[index]
+
+            laser = u['laser_values']
+            angles = np.linspace(-np.pi / 2, np.pi / 2, 361)
+
+            ranges = []
+            current_range = []
+            for angle, range in zip(angles, laser):
+                if 3 <= range < 40:
+                    current_range.append((angle, range))
+                else:
+                    if current_range:  # If there are measurements in the current range
+                        ranges.append(current_range)
+                        current_range = []  # Reset for the next range
+
+            if current_range:  # capture the last range if it doesn't end with the out of range value
+                ranges.append(current_range)
+
+            z = []
+            for dataRange in ranges:
+                if len(dataRange) >= 8:
+                    points = [
+                        (X[0, 0] + pair[1] * np.cos(pair[0] + X[2, 0]), X[1, 0] + pair[1] * np.sin(pair[0] + X[2, 0]))
+                        for pair in dataRange]
+                    (h, k) = find_circle_center_least_squares(points)  # obtain the center of the cluster
+                    deltaB = dataRange[len(dataRange) - 1][0] - dataRange[0][0]
+                    diam = deltaB * sum([pair[1] for pair in dataRange]) / len(dataRange)  # obtain the diameter
+                    angle, range = dataRange[(len(dataRange) - 1)//2] # take the mean in the dataRange to get the angle and range
+                    landmark = Landmark(diam, (h, k), range, angle)
+                    z.append(landmark)
+
+            # Use the EKF for estmation
+            state, sigma = updateEKF(state, sigma, z)
+
+
         if i == len(sensorManager-1):
             break
         i +=1
@@ -426,6 +468,7 @@ def displayRowData(rowOdom, rowLaser, sensorManager):
     plt.show()
 
 if __name__ == "__main__":
+    landmarks = Landmarks()
     dataManagement = parse_sensor_management("dataset/Sensors_manager.txt")
     laserData = parse_laser_data('dataset/LASER.txt')
     drsData = parse_odometry_data('dataset/DRS.txt')    
