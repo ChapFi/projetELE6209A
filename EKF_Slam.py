@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import linear_sum_assignment
 from Landmark import Landmark, Landmarks
+import pandas as pd
+from LazyData import LazyData
 
 Trees = np.array([])
 currentTime = 0
@@ -315,7 +317,7 @@ def EKFSlam(rowOdom, rowLaser, sensorManager):
     for sensor in sensorManager:
         if sensor['sensor'] == 2 and sensorManager[i+1]['sensor'] == 3:
             # Odom mesurement
-            idu = int(sensor['index'])-3
+            idu = int(sensor['index'])
             u = rowOdom[idu]
 
             #Time
@@ -323,7 +325,7 @@ def EKFSlam(rowOdom, rowLaser, sensorManager):
             cTime = dt + cTime
 
             #Laser mesurement
-            idlaser = int(sensor['index'])-2
+            idlaser = int(sensor['index'])
             laserMesures = rowLaser[idlaser]
             laser = laserMesures['laser_values']
             angles = np.linspace(-np.pi/2, np.pi/2, 361)
@@ -356,7 +358,7 @@ def EKFSlam(rowOdom, rowLaser, sensorManager):
             #Use the EKF for estmation
             state, sigma = extendedKalman(state, u, sigma, z, dt)
         elif sensor['sensor'] == 3:
-            index = int(sensor['index']) - 2
+            index = int(sensor['index'])
             u = rowLaser[index]
 
             laser = u['laser_values']
@@ -420,7 +422,7 @@ def displayRowData(rowOdom, rowLaser, sensorManager):
             Odom[:,i] = X[:,0]
             i += 1
         elif sensor['sensor'] == 3:
-            id = int(sensor['index'])-3
+            id = int(sensor['index'])
             mesures = rowLaser[id]
             mesures = mesures['laser_values']
             angles = np.linspace(-np.pi/2, np.pi/2, 361)
@@ -470,8 +472,7 @@ def displayRowData(rowOdom, rowLaser, sensorManager):
 if __name__ == "__main__":
     landmarks = Landmarks()
     dataManagement = parse_sensor_management("dataset/Sensors_manager.txt")
-    laserData = parse_laser_data('dataset/LASER.txt')
-    drsData = parse_odometry_data('dataset/DRS.txt')    
-    xf = displayRowData(drsData, laserData, dataManagement)
-    print(xf)
+    laserData = LazyData('dataset/LASER.txt', "laser")
+    drsData = LazyData('dataset/DRS.txt', "drs")
+    displayRowData(drsData, laserData, dataManagement)
 
