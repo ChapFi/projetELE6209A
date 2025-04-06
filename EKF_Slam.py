@@ -409,7 +409,7 @@ def displayRowData(rowOdom, rowLaser, sensorManager):
     time =0
     for sensor in sensorManager:
         if sensor['sensor'] == 2:
-            id = int(sensor['index'])-3
+            id = int(sensor['index'])
             mesure = rowOdom[id]
             dt = mesure['time_vs']-time
             time = dt + time
@@ -472,7 +472,8 @@ def displayRowData(rowOdom, rowLaser, sensorManager):
 if __name__ == "__main__":
     landmarks = Landmarks()
     dataManagement = parse_sensor_management("dataset/Sensors_manager.txt")
-    laserData = LazyData('dataset/LASER.txt', "laser")
+    laserData = LazyData('dataset/LASER_processed.txt', "laser")
     drsData = LazyData('dataset/DRS.txt', "drs")
     displayRowData(drsData, laserData, dataManagement)
+
 

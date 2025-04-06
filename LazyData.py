@@ -13,7 +13,7 @@ def parse_laser_data(filepath, chunk_size):
 def parse_drs_data(filepath, chunk_size):
     for chunk in pd.read_csv(filepath, header=None, sep="\t", chunksize=chunk_size):
         for _, row in chunk.iterrows():
-            yield {'time': row.iloc[0], 'sensor': row.iloc[1], 'index': row.iloc[2]}
+            yield {'time_vs': row.iloc[0], 'velocity': row.iloc[1], 'steering': row.iloc[2]}
 
 class LazyData:
     def __init__(self, filepath, data, chunk_size=100):
@@ -27,15 +27,14 @@ class LazyData:
             self.generator = parse_drs_data(filepath, chunk_size)
         else:
             raise ValueError(f"Invalid data type: {data}")
-        self.__len__()
 
     def __getitem__(self, idx):
-        while len(self.data) <= idx:
+        while len(self.data) < idx:
             try:
                 self.data.append(next(self.generator))
             except StopIteration:
                 raise IndexError("Index out of range in laser data")
-        return self.data[idx]
+        return self.data[idx-1]
 
     def __len__(self):
         if self._len == 0:
