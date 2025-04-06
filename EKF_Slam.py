@@ -2,6 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import linear_sum_assignment
 
+Trees = np.array([])
+currentTime = 0
+
 def parse_sensor_management(filepath):
     """
     Parses a sensor management text file with the specified structure.
@@ -163,7 +166,7 @@ def find_circle_center_least_squares(points):
 
     h, k, _ = np.linalg.lstsq(A, b, rcond=None)[0]
 
-    return (h, k)
+    return h, k
 
 def g(mesureT, estimatet1,dt, N):
     vt = mesureT[0,0]
@@ -209,12 +212,12 @@ def compute_data_association(z):
     # Create the associations
     associations = list(zip(row_ind, col_ind))
 
-    for 
 
 def extendedKalman(state, u, sigma, measure, dt):
     N = (len(state)-3)/3
-    currenTime = currenTime + dt
-    estState = g(u, state, dt)
+    global currentTime
+    currentTime = currentTime + dt
+    estState = g(u, state, dt, N)
     estSigma = covMatrix( u['velocity'], u['steering'], state[3,0],dt, N, sigma)
     
     #Correction
@@ -225,11 +228,11 @@ def extendedKalman(state, u, sigma, measure, dt):
         
         j = 3#TO DO
 
-        if np.norm(estState[j:j+2]) == 0:
-            estState[2*j:2*j+2]  = np.add(estState[0:2], np.array([[z[0,0]*np.cos(z[1,0] + estState[2,0])]
-                                                               ,[z[0,0]*np.sin(z[1,0] + estState[2,0])]]))
+        if np.linalg.norm(estState[j:j+2]) == 0:
+            estState[2*j:2*j+2]  = np.add(estState[0:2], np.array([[z[0,0]*np.cos(z[1,0] + estState[2,0])],
+                                                                   [z[0,0]*np.sin(z[1,0] + estState[2,0])]]))
         delta = np.subtract(estState[0:2], estState[j:j+2])
-        q = np.mamtmul(np.transpose(delta), delta)
+        q = np.matmul(np.transpose(delta), delta)
         zest = np.array([[np.sqrt(q)],
                          [np.arctan2(delta[1,0], delta[0,0])-estState[2,0]] ])
         err = np.subtract(z, zest)
@@ -251,17 +254,63 @@ def extendedKalman(state, u, sigma, measure, dt):
     newSigma = estSigma
     return newState, newSigma
 
+def updateEKF(state, sigma, measure):
+    # Only update state and covariance when getting laser measurement
+    for landmark in measure:
+        # From the pdf
+        # landmark should be (landmark id, r, theta)
+        # landmark id should be the in the order they appeared
+        j, r, theta = landmark
+
+        if state[j:j+2] == np.zeros(2):
+            state[j:j + 2] = state[0:2] + np.array([r*np.cos(theta + state[2]), r*np.sin(theta+state[2])])
+
+        delta = state[j:j+2] - state[0:2]
+        dx, dy = delta[0], delta[1]
+
+        q = delta.T @ delta
+        zit = np.array([np.sqrt(q), np.atan2(dy, dx) - state[2]])
+
+        H_low = (1 / q) * np.array([
+            [-np.sqrt(q) * dx, -np.sqrt(q) * dy, 0, np.sqrt(q) * dx, np.sqrt(q) * dy],
+            [dy, -dx, -q, -dy, dx]
+        ])
+
+        Fxj = np.zeros((5, 3 + 2 * len(measure)))
+
+        Fxj[0:3, 0:3] = np.eye(3)
+
+        landmark_index = 2*j + 1
+        Fxj[3, landmark_index] = 1
+        Fxj[4, landmark_index + 1] = 1
+
+        H_i = H_low @ Fxj
+
+        Qt = np.eye(2) # found the correct error matrix
+
+        S = H_i @ sigma @ H_i.T + Qt
+        K = sigma @ H_i.T @ np.linalg.inv(S)
+
+        # landmark should contain the distance to the landmark measured by the LiDAR i.e. r and theta
+        # same dimension as zit
+        state = state + K @ (landmark - zit)
+        sigma = (np.eye(sigma.shape[0]) - K @ H_i) @ sigma
+
+    return state, sigma
+
+
 def EKFSlam(rowOdom, rowLaser, sensorManager):
 
     #Initiale state
     nbLandmark = 500
     X = np.zeros([3+2*nbLandmark,1])
+    state = X
     sigma = np.zeros(3+2*nbLandmark)
     cTime = 0
 
     i = 0
     for sensor in sensorManager:
-        if sensor['sensor'] == 2 and sensorManager[i+1] == 3:
+        if sensor['sensor'] == 2 and sensorManager[i+1]['sensor'] == 3:
             # Odom mesurement
             idu = int(sensor['index'])-3
             u = rowOdom[idu]
@@ -297,7 +346,7 @@ def EKFSlam(rowOdom, rowLaser, sensorManager):
                     (h,k) = find_circle_center_least_squares(points) #obtain the center of the cluster
                     deltaB = dataRange[len(dataRange)-1][0]-dataRange[0][0]
                     diam = deltaB*sum([pair[1] for pair in dataRange])/len(dataRange) #obtain the diameter
-                    z.append((h,k, diam))
+                    z.append((h, k, diam))
             
             #Use the EKF for estmation
             state, sigma = extendedKalman(state, u, sigma, z, dt)
