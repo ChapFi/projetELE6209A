@@ -1,3 +1,5 @@
+import numpy as np
+
 class Landmark:
     def __init__(self, diameter, center, r=0, theta=0):
         self.diameter = diameter
@@ -6,35 +8,39 @@ class Landmark:
         self.theta = theta
 
     def __eq__(self, other):
-        if isinstance(other, Landmark):
-            return abs(self.diameter - other.diameter) < 1e-2 and abs(self.center - other.center) < 1e-2
-        return False
+        if not isinstance(other, Landmark):
+            return False
+        return (abs(self.diameter - other.diameter) < 1
+                and abs(self.centerx - other.centerx) < 1
+                and abs(self.centery - other.centery) < 1)
 
     def update(self, r, theta):
         self.r = r
         self.theta = theta
 
-    def getInfo(self):
-        return self.diameter, (self.centerx, self.centery)
-
     def getDistance(self):
         return self.r, self.theta
 
 
+def wrap_to_pi(angle):
+    """Normalize angle into [\u2013\u03c0, \u03c0]."""
+    return (angle + np.pi) % (2*np.pi) - np.pi
 
 class Landmarks:
     def __init__(self):
-        self.landmarks: [Landmark] = []
+        self.landmarks: list[Landmark] = []
 
-    def add(self, landmark):
-        if landmark not in self.landmarks:
-            self.landmarks.append(landmark)
-            index = len(self.landmarks)-1
-            return index, landmark
+    def add(self, meas: Landmark, index=-1):
+        """
+        Associate or initialize a landmark using nearest-neighbor gating.
+        meas: new Landmark with r, theta filled
+        state: full state vector [x, y, theta, ...]
+        sigma: full covariance
+        """
+        if index == -1:
+            self.landmarks.append(meas)
         else:
-            index = self.landmarks.index(landmark)
-            self.landmarks[index] = landmark
-            return index, landmark
+            self.landmarks[index] = meas
 
-    def __getitem__(self, item):
-        return item, self.landmarks[item]
+    def __iter__(self):
+        return iter(self.landmarks)
