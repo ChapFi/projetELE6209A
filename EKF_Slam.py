@@ -10,9 +10,34 @@ from matplotlib.patches import Ellipse
 from matplotlib.animation import FuncAnimation, FFMpegWriter
 from scipy.stats import chi2
 
+chi = chi2.ppf(0.999, df=2)
+
+def solve_cost_matrix_heuristic(M):
+    n_msmts = M.shape[0]
+    result = []
+
+    ordering = np.argsort(M.min(axis=1))
+
+    for msmt in ordering:
+        match = np.argmin(M[msmt,:])
+        M[:, match] = 1e8
+        result.append((msmt, match))
+
+    return result
+
 
 Trees = np.array([])
 currentTime = 0
+
+def normalize_angle(a):
+    while a >= np.pi:
+        a -= 2 * np.pi
+
+    while a < -np.pi:
+        a += 2 * np.pi
+
+    return a
+
 
 def parse_sensor_management(filepath):
     """
@@ -154,6 +179,7 @@ def parse_odometry_data(filepath):
 L = 2.83  # Wheelbase
 H = 0.76
 b = 0.5
+a = 3.78
 nbTrees = 0
 
 def find_circle_center_least_squares(points):
@@ -178,20 +204,21 @@ def find_circle_center_least_squares(points):
     return h, k
 
 def g(mesureT, estimatet1,dt, N):
-    vt = mesureT["velocity"]
-    wt = mesureT["steering"]
-    theta = estimatet1[2]
-    Dmu = np.array([vt * (-np.sin(theta) + np.sin(theta + wt * dt)) / wt,
-                    vt * (np.cos(theta) - np.cos(theta + wt * dt)) / wt,
-                    wt*dt])
+    alpha = mesureT["steering"]
+    vt = mesureT["velocity"]/(1- np.tan(alpha)*H/L)
+    x, y, theta = estimatet1[:3]
+    Dmu = np.array([dt*(vt*np.cos(theta) - vt/L*np.tan(alpha)*(a*np.sin(theta)+b*np.cos(theta))),
+                    dt*(vt*np.sin(theta) + vt/L*np.tan(alpha)*(a*np.sin(theta)-b*np.cos(theta))),
+                    dt*vt/L*np.tan(alpha)])
     Fx = np.zeros((N, 3))
     Fx[0:3,0:3] = np.eye(3)
     newmu = estimatet1 + Fx @ Dmu
+    newmu[3] = normalize_angle(newmu[3])
     return newmu
 
 
 
-def predict_covariance(sigma, vt, wt, theta, dt, R_robot):
+def predict_covariance(sigma, vt, alpha, theta, dt, R_robot):
     """
     Blockwise prediction of the full (3+2n)x(3+2n) covariance matrix.
 
@@ -204,10 +231,11 @@ def predict_covariance(sigma, vt, wt, theta, dt, R_robot):
     N_full = sigma.shape[0]
     n_land = (N_full - 3) // 2
 
+
     # 1) Build the 3×3 motion‐Jacobian G_r (∂g/∂x)
     G_r = np.array([
-        [1, 0, vt * (-np.cos(theta) + np.cos(theta + wt*dt)) / wt],
-        [0, 1, vt * (-np.sin(theta) + np.sin(theta + wt*dt)) / wt],
+        [1, 0, - dt*(vt*np.sin(theta) + vt/L*np.tan(alpha)*(a*np.cos(theta)-b*np.sin(theta)))],
+        [0, 1, dt*(vt*np.cos(theta) - vt/L*np.tan(alpha)*(a*np.sin(theta)+b*np.cos(theta)))],
         [0, 0, 1]
     ])
 
@@ -227,10 +255,6 @@ def predict_covariance(sigma, vt, wt, theta, dt, R_robot):
     # (sigma[3:,3:] stays as is)
 
     return sigma
-
-def normalize_angle(a):
-    return (a + np.pi) % (2*np.pi) - np.pi
-
 
 def compute_H_j(mu, j):
     """
@@ -276,125 +300,111 @@ def compute_H_j(mu, j):
     return H
 
 
-from scipy.spatial import cKDTree
+from scipy.optimize import linear_sum_assignment
 
-def data_association(mu, Sigma, measurements, R, n_active,
-                                merge_radius=1.0,
-                                gate_prob=0.95, ambiguity_ratio=1.2):
-    # 1) Pre‑extract pose and small covariance blocks
-    x, y, theta = mu[0], mu[1], mu[2]
-    Sigma_rr = Sigma[0:3,   0:3]
-    Sigma_rl = Sigma[0:3,   3:]
-    Sigma_lr = Sigma_rl.T
+def compute_data_association(state, sigma, measurements):
+    '''
+    Computes measurement data association.
 
-    # 2) Build k-d tree on current landmark centers
-    if n_active > 0:
-        lm_pos = mu[3:3+2*n_active].reshape(n_active,2)
-        tree  = cKDTree(lm_pos)
-    else:
-        lm_pos = np.zeros((0,2))
-        tree   = None
+    Given a robot and map state and a set of (range,bearing) measurements,
+    this function should compute a good data association, or a mapping from
+    measurements to landmarks.
 
-    gamma = chi2.ppf(gate_prob, df=2)
-    associations = []
+    Returns an array 'assoc' such that:
+        assoc[i] == j if measurement i is determined to be an observation of landmark j,
+        assoc[i] == -1 if measurement i is determined to be a new, previously unseen landmark, or,
+        assoc[i] == -2 if measurement i is too ambiguous to use and should be discarded.
+    '''
 
-    for (r_meas, phi_meas) in measurements:
-        # approximate global point
-        px = x + r_meas * np.cos(theta + phi_meas)
-        py = y + r_meas * np.sin(theta + phi_meas)
+    if len(landmarks.landmarks) == 0:
+        return [-1 for _ in measurements]
 
-        # ——  A) Euclidean pre‑merge  ——
-        if tree is not None:
-            idxs = tree.query_ball_point([px,py], merge_radius)
-            if idxs:
-                # pick the nearest by Eucl distance
-                dists = [(px-lm_pos[j,0])**2 + (py-lm_pos[j,1])**2
-                         for j in idxs]
-                j_best = idxs[int(np.argmin(dists))]
-                associations.append(j_best)
+    n_lmark = len(landmarks.landmarks)
+    n_scans = len(measurements)
+    M = np.full((n_scans, n_lmark), 1e8, dtype=float)
+    Qt = np.array([[0.5**2, 0], [0, (5*np.pi/180)**2]])
+
+    alpha = chi2.ppf(0.95, 2)
+    beta = chi2.ppf(0.99, 2)
+    A = alpha * np.ones((n_scans, n_scans))
+
+    for j in range(n_lmark):
+        Nfull = state.shape[0]
+        # 1) build the sub‑state indices: robot [0,1,2] + landmark j [3+2j, 4+2j]
+        iL = 3 + 2 * j
+        inds = [0, 1, 2, iL, iL + 1]
+
+        # 2) extract sub‑state & sub‑covariance
+        x_sub = state[inds].copy()  # shape (5,)
+        Σ_sub = sigma[np.ix_(inds, inds)].copy()  # shape (5,5)
+
+        # 3) compute expected measurement & Jacobian in this 5‑D space
+        dx, dy = x_sub[3] - x_sub[0], x_sub[4] - x_sub[1]
+        q = dx * dx + dy * dy
+        sqrtq = np.sqrt(q)
+        z_hat = np.array([sqrtq,
+                          normalize_angle(np.arctan2(dy, dx) - x_sub[2])])
+        # 2×5 low‑dim Jacobian
+        H = (1 / q) * np.array([
+            [-sqrtq * dx, -sqrtq * dy, 0, sqrtq * dx, sqrtq * dy],
+            [dy, -dx, -q, -dy, dx]
+        ])
+
+        # 4) Kalman gain in the 5‑D subspace
+        S = H @ Σ_sub @ H.T + Qt  # 2×2
+        Sinv = np.linalg.inv(S)
+        for i in range(n_scans):
+            temp_z = measurements[i][:2]
+            res = temp_z - np.squeeze(z_hat)
+            M[i, j] = res.T @ (Sinv @ res)
+
+    M_new = np.hstack((M, A))
+    rows, cols = linear_sum_assignment(M_new)
+    assoc = np.full(n_scans, -2, dtype=int)
+
+    for i, c in zip(rows, cols):
+        cost = M_new[i, c]
+        if cost > beta:
+            assoc[i] = -2  # too big → discard
+        elif c < n_lmark:
+            assoc[i] = c  # matched to existing j
+        else:
+            assoc[i] = -1  # matched to “new” column
+
+
+    return assoc
+
+def merge_landmarks(landmarks, pos_threshold=0.5, diam_threshold=0.5):
+    merged = []
+    skip_indices = set()
+
+    for i, lm1 in enumerate(landmarks.landmarks):
+        if i in skip_indices:
+            continue
+
+        for j in range(i+1, len(landmarks.landmarks)):
+            if j in skip_indices:
                 continue
 
-        # ——  B) full Mahalanobis gating  ——
-        best_d2   = float("inf")
-        second_d2 = float("inf")
-        best_j    = None
+            lm2 = landmarks.landmarks[j]
 
-        for j in range(n_active):
-            xj = mu[3+2*j]
-            yj = mu[3+2*j+1]
-            dx, dy = xj - x, yj - y
-            q = dx*dx + dy*dy
-            if q < 1e-6:
-                continue      # skip degenerate
-            r_hat = np.sqrt(q)
-            # range partials
-            dr_dx      = -dx/r_hat
-            dr_dy      = -dy/r_hat
-            dr_dtheta  = 0.0
-            dr_dxj     = +dx/r_hat
-            dr_dyj     = +dy/r_hat
-            a = np.array([dr_dx, dr_dy, dr_dtheta])   # 1×3
-            b = np.array([dr_dxj, dr_dyj])            # 1×2
+            # Mahalanobis distance between landmark centers
+            delta = lm2.center - lm1.center
+            combined_cov = lm1.covariance + lm2.covariance
+            mahal_dist = delta.T @ np.linalg.inv(combined_cov) @ delta
 
-            # bearing partials
-            dphi_dx     =  dy/q
-            dphi_dy     = -dx/q
-            dphi_dtheta = -1.0
-            dphi_dxj    = -dy/q
-            dphi_dyj    = +dx/q
-            c = np.array([dphi_dx, dphi_dy, dphi_dtheta])
-            d = np.array([dphi_dxj, dphi_dyj])
+            # Diameter difference
+            diam_diff = abs(lm1.diameter - lm2.diameter)
 
-            # 3) extract the tiny covariance subblocks for landmark j
-            idx3 = 3 + 2*j
-            Sigma_rl_j = Sigma_rl[:,   2*j:2*j+2]          # shape (3,2)
-            Sigma_lr_j = Sigma_lr[2*j:2*j+2, :]             # shape (2,3)
-            Sigma_ll_j = Sigma[idx3:idx3+2, idx3:idx3+2]    # shape (2,2)
+            # Merge conditions
+            if mahal_dist < pos_threshold and diam_diff < diam_threshold:
+                lm1.update(lm2.center, lm2.diameter, lm2.covariance)
+                skip_indices.add(j)
+                del lm2
 
-            # 4) form the 2×2 S directly
-            # S11 = a Σ_rr aᵀ + 2 a Σ_rl_j bᵀ + b Σ_ll_j bᵀ
-            S11 = a @ (Sigma_rr @ a) \
-                 + 2*(a @ (Sigma_rl_j @ b)) \
-                 + b @ (Sigma_ll_j @ b)
-            # S22 = c Σ_rr cᵀ + 2 c Σ_rl_j dᵀ + d Σ_ll_j dᵀ
-            S22 = c @ (Sigma_rr @ c) \
-                 + 2*(c @ (Sigma_rl_j @ d)) \
-                 + d @ (Sigma_ll_j @ d)
-            # S12 = a Σ_rr cᵀ + a Σ_rl_j dᵀ + b Σ_lr_j cᵀ + b Σ_ll_j dᵀ
-            S12 = a @ (Sigma_rr @ c) \
-                 +   a @ (Sigma_rl_j @ d) \
-                 +   b @ (Sigma_lr_j @ c) \
-                 +   b @ (Sigma_ll_j @ d)
+        merged.append(lm1)
 
-            S = np.array([[S11, S12],
-                          [S12, S22]]) + R
-
-            # 5) innovation
-            z_hat = np.array([r_hat,
-                              normalize_angle(np.arctan2(dy,dx) - theta)])
-            y_err = np.array([r_meas, phi_meas]) - z_hat
-            y_err[1] = normalize_angle(y_err[1])
-
-            # 6) Mahalanobis distance without inverting S explicitly
-            sol = np.linalg.solve(S, y_err)
-            d2 = float(y_err.dot(sol))
-            # track best and second‑best d2
-            if d2 < best_d2:
-                second_d2, best_d2 = best_d2, d2
-                best_j = j
-            elif d2 < second_d2:
-                second_d2 = d2
-
-        # gating logic
-        if best_j is None or best_d2 > gamma:
-            # truly new
-            associations.append(None)
-        elif second_d2 < gamma and second_d2/best_d2 < ambiguity_ratio:
-            associations.append('discard')
-        else:
-            associations.append(best_j)
-
-    return associations
+    landmarks.landmarks = merged
 
 
 def update_landmark_subblock(state, sigma, j, meas, Qt):
@@ -422,7 +432,7 @@ def update_landmark_subblock(state, sigma, j, meas, Qt):
     q = dx * dx + dy * dy
     sqrtq = np.sqrt(q)
     z_hat = np.array([sqrtq,
-                      np.arctan2(dy, dx) - x_sub[2]])
+                      normalize_angle(np.arctan2(dy, dx) - x_sub[2])])
     # 2×5 low‑dim Jacobian
     H_low = (1 / q) * np.array([
         [-sqrtq * dx, -sqrtq * dy, 0, sqrtq * dx, sqrtq * dy],
@@ -436,6 +446,7 @@ def update_landmark_subblock(state, sigma, j, meas, Qt):
     # 5) state & sub‑covariance update
     err = np.array(meas) - z_hat
     x_sub += K_sub @ err  # (5,)
+    x_sub[2] = normalize_angle(x_sub[2])
     Σ_sub = (np.eye(5) - K_sub @ H_low) @ Σ_sub  # (5,5)
 
     # 6) scatter back into full state & covariance
@@ -453,6 +464,73 @@ def update_landmark_subblock(state, sigma, j, meas, Qt):
     return state, sigma
 
 
+import numpy as np
+from scipy.stats import chi2
+
+import numpy as np
+from scipy.stats import chi2
+
+def normalize_angle(a):
+    return (a + np.pi) % (2*np.pi) - np.pi
+
+def gps_update(state: np.ndarray,
+               sigma: np.ndarray,
+               gps_xy: tuple[float,float],
+               sigma_gps: float,
+               gate_prob: float = 0.999):
+    """
+    EKF GPS update that only touches the robot (x,y) block and its cross-covariances,
+    leaving all landmark‐landmark covariances untouched.
+    """
+
+    n = state.shape[0]
+    # indices of the robot pos block
+    inds = [0,1]
+    # the rest
+    rest = list(range(2,n))
+
+    # 1) extract P00 and P0r
+    P00 = sigma[np.ix_(inds, inds)]   # 2×2
+    P0r = sigma[np.ix_(inds, rest)]   # 2×(n-2)
+
+    # 2) innovation
+    z    = np.array(gps_xy)
+    zhat = state[:2]
+    r    = z - zhat
+
+    # 3) innovation covariance and gating
+    R = np.eye(2) * sigma_gps**2
+    S = P00 + R
+    Sinv = np.linalg.inv(S)
+    if float(r.T @ Sinv @ r) > chi2.ppf(gate_prob, df=2):
+        return state, sigma  # outlier: no update
+
+    # 4) Kalman gain (full n×2)
+    #    but we really only need K for the state update and the small block
+    K = sigma[:, :2] @ Sinv  # shape (n×2)
+
+    # 5) state update
+    state += K @ r
+    state[2] = normalize_angle(state[2])
+
+    # 6) block‐wise covariance update:
+    #    K_small = P00 @ S⁻¹  (2×2)
+    K_small = P00 @ Sinv
+
+    I2 = np.eye(2)
+    # updated robot‐robot block
+    sigma[np.ix_(inds, inds)] = (I2 - K_small) @ P00
+    # updated robot‐landmark cross‐covariances
+    sigma[np.ix_(inds, rest)] = (I2 - K_small) @ P0r
+    # mirror into landmark‐robot block
+    sigma[np.ix_(rest, inds)] = sigma[np.ix_(inds, rest)].T
+    # leave sigma[rest,rest] unchanged
+
+    return state, sigma
+
+
+
+
 def extendedKalman(state, u, sigma, measure, dt):
     N = (len(state))
     global currentTime
@@ -463,11 +541,11 @@ def extendedKalman(state, u, sigma, measure, dt):
 
     # … inside your EKF predict …
     newSigma = predict_covariance(sigma,
-                               vt=u['velocity'],
-                               wt=u['steering'],
-                               theta=state[2],
-                               dt=dt,
-                               R_robot=R_x)
+                                  vt=u['velocity'],
+                                  alpha=u['steering'],
+                                  theta=state[2],
+                                  dt=dt,
+                                  R_robot=R_x)
 
     # #Correction
     # sr2 = 1 #To DO trouver les valeurs
@@ -493,70 +571,68 @@ def updateEKF(state, sigma, measure: list[Landmark]):
     zs = []
     for lm in measure:
         # assuming lm.getDistance() returns (r,theta)
-        zs.append(tuple(lm.getDistance()))
+        r, theta = lm.getDistance()
+        diam = lm.diameter  # grab the cluster‐based trunk width
+        zs.append((r, theta, diam))
 
     # 2) gate & associate them
     #    R: your 2×2 measurement noise; Qt below is the process/measurement noise you pass to update
     n_active = len(landmarks.landmarks)
 
-    # associate
-    associations = data_association(
-        state, sigma, zs,
-        R=np.eye(2) * 0.01,
-        n_active=n_active,
-        gate_prob=0.8, ambiguity_ratio=1
-    )
+    sigmas = {'range': 0.1, 'bearing': 0.01}
+    associations = compute_data_association(state, sigma, zs)
 
     # 3) loop & update
     for (z, assoc, lm) in zip(zs, associations, measure):
-        if assoc == 'discard':
+        if assoc == -2:
             continue
+        r, theta, diam = z
 
         # brand-new?
-        if assoc is None:
+        if assoc == -1:
             # initialize a new landmark (augment mu,Sigma) and get its index j
             landmarks.add(lm)
             j = len(landmarks.landmarks)-1
-            r, theta = z
-            state[2*j+3:2*j+5] = state[0:2] + np.array([r*np.cos(theta + state[2]), r*np.sin(theta+state[2])])
+            state[2*j+3:2*j+5] = state[0:2] + np.array([(r+diam/2)*np.cos(theta + state[2]), (r+diam/2)*np.sin(theta+state[2])])
 
         else:
             j = assoc
 
-        # now do your usual EKF update on subblock j
         state, sigma = update_landmark_subblock(
-            state, sigma, j, z,
-            Qt=np.eye(2) * 0.01  # or whatever your laser‐noise is
+            state, sigma, j, (r, theta),
+            Qt=np.array([[0.5**2, 0], [0, (5*np.pi/180)**2]])
         )
+        landmarks.landmarks[j].update(state[2*j+3:2*j+5], diam, sigma[3 + 2 * j:5 + 2 * j, 3 + 2 * j:5 + 2 * j])
+        updated_covariance = sigma[3 + 2 * j:5 + 2 * j, 3 + 2 * j:5 + 2 * j]
+        landmarks.landmarks[j].covariance = updated_covariance
     return state, sigma
 
 
-def EKFSlam(rowOdom, rowLaser, sensorManager):
+def EKFSlam(rowGPS, rowOdom, rowLaser, sensorManager):
 
     #Initiale state
-    nbLandmark = 500
+    nbLandmark = 1500
     X = np.zeros(3+2*nbLandmark)
     state = X
     sigma = np.eye(3+2*nbLandmark)*1e6
     sigma[:3, :3] = np.zeros((3, 3))
     currentTime = 0
-    R_x = np.diag([0.5 ** 2, 0.5 ** 2, (0.5 * np.pi / 180) ** 2])
+    R_x = np.diag([0.05 ** 2, 0.05 ** 2, (0.5 * np.pi / 180) ** 2])
 
     robot_hist = []
     # lm_centers_hist = []
     # sigma_hist = []
 
     for entry in tqdm(sensorManager):
+        dt = entry['time'] - currentTime
+        currentTime += dt
         if entry['sensor'] == 2:
             # — Prediction step
             u = rowOdom[entry['index']]
-            dt = u['time_vs'] - currentTime
-            currentTime += dt
-
             state = g(u, state, dt, len(state))
             sigma = predict_covariance(sigma,
                                        vt=u['velocity'],
-                                       wt=u['steering'],
+                                       alpha=u['steering'],
                                        theta=state[2],
                                        dt=dt,
                                        R_robot=R_x)
@@ -568,6 +644,7 @@ def EKFSlam(rowOdom, rowLaser, sensorManager):
             # sigma_hist.append(sigma.copy())
         elif entry['sensor'] == 3:
             laser = rowLaser[entry['index']]['laser_values']
+
             # replace 30+ lines of manual masking with:
             detections = extract_trees(np.array(laser), params=None)
 
@@ -582,14 +659,19 @@ def EKFSlam(rowOdom, rowLaser, sensorManager):
                                   theta=ang))
 
             # now do your EKF update as before:
-            updateEKF(state, sigma, z)
+            state, sigma = updateEKF(state, sigma, z)
             robot_hist.append(state[:3].copy())
             # lm_centers_hist.append([
             #     (lm.centerx, lm.centery) for lm in landmarks.landmarks
             # ])
             # sigma_hist.append(sigma.copy())
+        elif entry['sensor'] == 1:
+            gps = rowGPS[entry['index']]
+            state, sigma = gps_update(state, sigma, (gps['latitude'], gps['longitude']), 3)
 
     # return state, np.array(robot_hist), lm_centers_hist, sigma_hist
+    #merge_landmarks(landmarks, pos_threshold=1, diam_threshold=0.1)
+
     return state, np.array(robot_hist), sigma
 
 def displayRowData(rowOdom, rowLaser, sensorManager):
@@ -676,7 +758,7 @@ def plot_landmarks_with_cov(landmarks, sigma, ax=None, n_std=2.0, **ellipse_kwar
 
     for j, lm in enumerate(landmarks.landmarks):
         # 1) extract mean
-        cx, cy = lm.centerx, lm.centery
+        cx, cy = lm.center
 
         # 2) extract 2x2 covariance for this landmark
         iL = 3 + 2*j
@@ -708,14 +790,15 @@ if __name__ == "__main__":
     dataManagement = parse_sensor_management("dataset/Sensors_manager.txt")
     laserData = LazyData('dataset/LASER_processed.txt', "laser")
     drsData = LazyData('dataset/DRS.txt', "drs")
+    gpsData = LazyData('dataset/GPS.txt', 'gps')
     #displayRowData(drsData, laserData, dataManagement)
 
     # import cProfile, pstats
-    
-    # cProfile.run('EKFSlam(drsData, laserData, dataManagement)', 'prof')
+    #
+    # cProfile.run('EKFSlam(gpsData, drsData, laserData, dataManagement)', 'prof')
     # p = pstats.Stats('prof')
     # p.sort_stats('tottime').print_stats(10)
-    finalstate, allState, sigma = EKFSlam(drsData, laserData, dataManagement)
+    finalstate, allState, sigma = EKFSlam(gpsData, drsData, laserData, dataManagement)
     plt.plot(allState[:,0], allState[:,1], label='EKF SLAM')
     fig, ax = plt.subplots(figsize=(8, 8))
     # 1) plot robot path
@@ -733,6 +816,7 @@ if __name__ == "__main__":
     ax.set_title('SLAM Landmarks with 95% Covariance Ellipses')
     ax.legend()
     ax.axis('equal')
+    print(len(landmarks.landmarks))
 
     # final_state, robot_hist, lm_centers_hist, sigma_hist = \
     #     EKFSlam(drsData, laserData, dataManagement)
@@ -809,5 +893,15 @@ if __name__ == "__main__":
     # pbar.close()
 
     plt.savefig('foo.png')
+
+    fig, ax = plt.subplots()
+    im = ax.imshow(sigma, cmap='viridis',      # pick any Matplotlib colormap
+           interpolation='none' # no smoothing between cells
+          )
+
+
+    fig.colorbar(im, ax=ax)
+
+    plt.savefig('cov.png')
 
 

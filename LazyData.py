@@ -15,6 +15,11 @@ def parse_drs_data(filepath, chunk_size):
         for _, row in chunk.iterrows():
             yield {'time_vs': row.iloc[0], 'velocity': row.iloc[1], 'steering': row.iloc[2]}
 
+def parse_gps_data(filepath, chunk_size):
+    for chunk in pd.read_csv(filepath, header=None, sep="\t", chunksize=chunk_size):
+        for _, row in chunk.iterrows():
+            yield {'time_vs': row.iloc[0], 'latitude': row.iloc[1], 'longitude': row.iloc[2]}
+
 class LazyData:
     def __init__(self, filepath, data, chunk_size=100):
         self.data = []
@@ -25,6 +30,8 @@ class LazyData:
             self.generator = parse_laser_data(filepath, chunk_size)
         elif data == "drs":
             self.generator = parse_drs_data(filepath, chunk_size)
+        elif data == 'gps':
+            self.generator = parse_gps_data(filepath, chunk_size)
         else:
             raise ValueError(f"Invalid data type: {data}")
 

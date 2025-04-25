@@ -1,30 +1,26 @@
 import numpy as np
 
 class Landmark:
-    def __init__(self, diameter, center, r=0, theta=0):
+    def __init__(self, diameter, center, r, theta, covariance=np.eye(2) * 1e3):
         self.diameter = diameter
-        self.centerx, self.centery = center
-        self.r = r
+        self.center = np.array(center)
+        self.covariance = covariance  # 2x2 position uncertainty covariance
+        self.count = 1
         self.theta = theta
-
-    def __eq__(self, other):
-        if not isinstance(other, Landmark):
-            return False
-        return (abs(self.diameter - other.diameter) < 1
-                and abs(self.centerx - other.centerx) < 1
-                and abs(self.centery - other.centery) < 1)
-
-    def update(self, r, theta):
         self.r = r
-        self.theta = theta
+
+    def update(self, new_center, new_diameter, new_cov):
+        """Fuse new landmark into this landmark."""
+        K = self.covariance @ np.linalg.inv(self.covariance + new_cov)
+        self.center = self.center + K @ (new_center - self.center)
+        self.covariance = (np.eye(2) - K) @ self.covariance
+        self.diameter = (self.diameter * self.count + new_diameter) / (self.count + 1)
+        self.count += 1
 
     def getDistance(self):
         return self.r, self.theta
 
 
-def wrap_to_pi(angle):
-    """Normalize angle into [\u2013\u03c0, \u03c0]."""
-    return (angle + np.pi) % (2*np.pi) - np.pi
 
 class Landmarks:
     def __init__(self):
