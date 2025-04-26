@@ -25,26 +25,49 @@ class LazyData:
         self.data = []
         self.filepath = filepath
         self.chunk_size = chunk_size
-        self._len = 0
+        self._len = None
+
+        # buffer of the last chunk_size rows
+        self._buf = []
+        # global index of the first row in self._buf (1-based)
+        self._start = 1
         if data == "laser":
-            self.generator = parse_laser_data(filepath, chunk_size)
+            self._generator = parse_laser_data(filepath, chunk_size)
         elif data == "drs":
-            self.generator = parse_drs_data(filepath, chunk_size)
+            self._generator = parse_drs_data(filepath, chunk_size)
         elif data == 'gps':
-            self.generator = parse_gps_data(filepath, chunk_size)
+            self._generator = parse_gps_data(filepath, chunk_size)
         else:
             raise ValueError(f"Invalid data type: {data}")
 
     def __getitem__(self, idx):
-        while len(self.data) < idx:
+        # 1-based indexing
+        if idx < 1 or idx > len(self):
+            raise IndexError(f"Index {idx} out of range [1..{len(self)}]")
+
+        # if they ask for something we've already dropped → error
+        if idx < self._start:
+            raise IndexError(f"Index {idx} was dropped from buffer")
+
+        # keep pulling rows until the buffer covers idx
+        while self._start + len(self._buf) <= idx:
             try:
-                self.data.append(next(self.generator))
+                row = next(self._generator)
             except StopIteration:
-                raise IndexError("Index out of range in laser data")
-        return self.data[idx-1]
+                raise IndexError("Reached end of file unexpectedly")
+            self._buf.append(row)
+
+            # once we exceed our window, pop the oldest
+            if len(self._buf) > self.chunk_size:
+                self._buf.pop(0)
+                self._start += 1
+
+        # now idx is inside [self._start, self._start+len(_buf)-1]
+        buf_idx = idx - self._start
+        return self._buf[buf_idx]
 
     def __len__(self):
-        if self._len == 0:
+        if self._len is None:
             chunk = 1024 * 1024
             f = np.memmap(self.filepath)
             num_newlines = sum(np.sum(f[i:i + chunk] == ord('\n'))
