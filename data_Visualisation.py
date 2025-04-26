@@ -99,7 +99,6 @@ def check_nis_consistency(nis_values, measurement_dimension, confidence_level=0.
 
 def NIS_test(NIS_val):
     nis_values = NIS_val
-    print(nis_values)
     measurement_dim = 2 # Get the dimension of the measurement vector
     lower, upper, percentage = check_nis_consistency(nis_values, measurement_dim)
     print(f"NIS Consistency Check (Confidence Level: 95%):")
@@ -134,6 +133,22 @@ def NIS_test(NIS_val):
     p2 = [upper, upper]
     plt.plot(p1,p2)
     plt.show()
+
+def plot_Map(state, landmarks, sigma):
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.plot(state[:, 0], state[:, 1], '-k', label='EKF Path')
+    ax.set_xlabel('longitude (m)')
+    ax.set_ylabel('lattitude (m)')
+    ax.set_title('SLAM Landmarks with 95% Covariance Ellipses')
+    ax.legend()
+    plot_landmarks_with_cov(
+        landmarks, sigma, ax=ax,
+        n_std=2,
+        edgecolor='blue', facecolor='none', linewidth=1, alpha=0.7
+    )
+    plt.savefig('images/finalMap.png')
+    plt.close()
+
 
 def find_circle_center_least_squares(points):
     """
@@ -265,8 +280,80 @@ def plot_landmarks_with_cov(landmarks, sigma, ax=None, n_std=2.0, **ellipse_kwar
 
     return ax
 
+# final_state, robot_hist, lm_centers_hist, sigma_hist = \
+#     EKFSlam(drsData, laserData, dataManagement)
+#
+# fig, ax = plt.subplots(figsize=(8, 8))
+# ax.set_aspect('equal', 'box')
+#
+# # line for robot path
+# traj_line, = ax.plot([], [], '-k', lw=1)
+#
+# # scatter for landmark centers
+# land_scat = ax.scatter([], [], s=20, c='tab:blue')
+    #
+    # # store ellipse artists
+    # ellipses = []
+    #
+    # # autoscale
+    # xs = robot_hist[:, 0]
+    # ys = robot_hist[:, 1]
+    # pad = 5
+    # ax.set_xlim(xs.min() - pad, xs.max() + pad)
+    # ax.set_ylim(ys.min() - pad, ys.max() + pad)
+    #
+    #
+    # def animate(i):
+    #     # 1) robot trajectory so far
+    #     traj_line.set_data(robot_hist[:i + 1, 0], robot_hist[:i + 1, 1])
+    #
+    #     # 2) current landmark centers
+    #     centers = lm_centers_hist[i]
+    #     if centers:
+    #         land_scat.set_offsets(centers)
+    #     else:
+    #         land_scat.set_offsets([])
+    #
+    #     # 3) draw covariance ellipses at this step
+    #     #    first remove old
+    #     for e in ellipses:
+    #         e.remove()
+    #     ellipses.clear()
+    #
+    #     sigma = sigma_hist[i]
+    #     for j, (cx, cy) in enumerate(centers):
+    #         # extract 2×2 sub‑cov for landmark j
+    #         iL = 3 + 2 * j
+    #         cov = sigma[iL:iL + 2, iL:iL + 2]
+    #
+    #         # eigen‑decompose
+    #         vals, vecs = np.linalg.eigh(cov)
+    #         order = vals.argsort()[::-1]
+    #         vals, vecs = vals[order], vecs[:, order]
+    #         angle = np.degrees(np.arctan2(vecs[1, 0], vecs[0, 0]))
+    #         width, height = 2 * 2 * np.sqrt(vals)  # 2‑sigma ellipse
+    #
+    #         e = Ellipse((cx, cy), width, height, angle=angle,
+    #                     edgecolor='C1', facecolor='none', lw=1, alpha=0.6)
+    #         ax.add_patch(e)
+    #         ellipses.append(e)
+    #
+    #     return [traj_line, land_scat] + ellipses
+    #
+    #
+    # pbar = tqdm(total=len(robot_hist), desc="Saving animation")
+    #
+    #
+    # # Define callback to update the progress bar
+    # def progress_callback(frame_number, total_frames):
+    #     pbar.update(1)
+    #
+    # ani = FuncAnimation(fig, animate,
+    #                     frames=len(robot_hist),
+    #                     interval=100)
+    # ani.save("ekf.mp4", writer='ffmpeg', fps=60, dpi=200, bitrate=1800, progress_callback=progress_callback)
+    # pbar.close()
 
 if __name__ == "__main__":
     loaded_nis = np.load('NIS_history.npy', allow_pickle=True)
-    print(loaded_nis)
     NIS_test(loaded_nis)

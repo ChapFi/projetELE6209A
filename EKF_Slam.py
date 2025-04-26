@@ -297,9 +297,6 @@ def compute_H_j(mu, j):
 
     return H
 
-
-from scipy.optimize import linear_sum_assignment
-
 def compute_data_association(state, sigma, measurements):
     '''
     Computes measurement data association.
@@ -327,7 +324,6 @@ def compute_data_association(state, sigma, measurements):
     A = alpha * np.ones((n_scans, n_scans))
 
     for j in range(n_lmark):
-        Nfull = state.shape[0]
         # 1) build the sub‑state indices: robot [0,1,2] + landmark j [3+2j, 4+2j]
         iL = 3 + 2 * j
         inds = [0, 1, 2, iL, iL + 1]
@@ -355,7 +351,7 @@ def compute_data_association(state, sigma, measurements):
             temp_z = measurements[i][:2]
             res = temp_z - np.squeeze(z_hat)
             M[i, j] = res.T @ (Sinv @ res)
-
+ 
     M_new = np.hstack((M, A))
     rows, cols = linear_sum_assignment(M_new)
     assoc = np.full(n_scans, -2, dtype=int)
@@ -368,8 +364,7 @@ def compute_data_association(state, sigma, measurements):
             assoc[i] = c  # matched to existing j
         else:
             assoc[i] = -1  # matched to “new” column
-
-
+    
     return assoc
 
 def merge_landmarks(landmarks, pos_threshold=0.5, diam_threshold=0.5):
@@ -475,23 +470,21 @@ def gps_update(state: np.ndarray,
     P0  = sigma[:,:2]            # n×2
 
     # 2) innovation and noise
-    r = np.transpose([np.array(gps_xy) - state[:2]])              # shape (2,1)
-    R = np.eye(2) * sigma_gps**2                    # 2×2
+    res = np.array(gps_xy) - state[:2 ]# 2x1
+    R = np.eye(2) * sigma_gps**2 # 2×2
     
     # 3) innovation cov & gate
     S = P00 + R
     Sinv = np.linalg.inv(S)
-    
-    v = float(calculate_nis(r, S)[0,0])
+    v = res.T @ (Sinv @ res)
 
     if v > chi2.ppf(gate_prob, df=2):
         return state, sigma, None  # outlier, skip
-    print("hi")
     # 4) Kalman gain K = P[:,0:2] @ S⁻¹
     K = P0 @ Sinv           # n×2
 
     # 5) state update & wrap angle
-    state += np.matmul(K, r)[:,0]
+    state += np.matmul(K, res)
     state[2] = normalize_angle(state[2])
 
     # 6) covariance update P ← P − K·P0ᵀ
@@ -505,7 +498,7 @@ def extendedKalman(state, u, sigma, measure, dt):
     currentTime = currentTime + dt
     newState = g(u, state, dt, N)
     # Define your robot process noise once, e.g.
-    R_x = np.diag([0.05 ** 2, 0.05 ** 2, (0.5 * np.pi / 180) ** 2])
+    R_x = np.diag([0.15 ** 2, 0.15 ** 2, (0.5*np.pi/ 180) ** 2])# np.diag([0.05 ** 2, 0.05 ** 2, (0.5 * np.pi / 180) ** 2])#
 
     # … inside your EKF predict …
     newSigma = predict_covariance(sigma,
@@ -544,14 +537,12 @@ def updateEKF(state, sigma, measure: list[Landmark]):
             landmarks.add(lm)
             j = len(landmarks.landmarks)-1
             state[2*j+3:2*j+5] = state[0:2] + np.array([(r+diam/2)*np.cos(theta + state[2]), (r+diam/2)*np.sin(theta+state[2])])
-            
-
         else:
             j = assoc
 
         state, sigma, nis = update_landmark_subblock(
             state, sigma, j, (r, theta),
-            Qt=np.array([[0.5**2, 0], [0, (5*np.pi/180)**2]])
+            Qt= np.array([[0.5**2, 0], [0, (5*np.pi/180)**2]]) # np.array([[1**2, 0], [0, (0.01)**2]])#
         )
         landmarks.landmarks[j].update(state[2*j+3:2*j+5], diam, sigma[3 + 2 * j:5 + 2 * j, 3 + 2 * j:5 + 2 * j])
         updated_covariance = sigma[3 + 2 * j:5 + 2 * j, 3 + 2 * j:5 + 2 * j]
@@ -565,18 +556,16 @@ def EKFSlam(rowGPS, rowOdom, rowLaser, sensorManager):
     #Initiale state
     nbLandmark = 1500
     X = np.zeros(3+2*nbLandmark)
-    X[0] = -67.649      
-    X[1] = -41.714 
-    X[2] = 36*np.pi/180
+    X[0] = -67.6493   
+    X[1] = -41.7142 
+    X[2] = 35.5*np.pi/180
     state = X
     sigma = np.eye(3+2*nbLandmark)*1e6
     sigma[0:3, 0:3] = np.diag([.1, .1, 1])
     currentTime = 0
-    R_x = np.diag([0.05 ** 2, 0.05 ** 2, (0.5 * np.pi / 180) ** 2])
+    R_x = np.diag([0.15** 2, 0.15** 2, (0.5*np.pi/ 180) ** 2])# np.diag([0.05 ** 2, 0.05 ** 2, (0.5 * np.pi / 180) ** 2])#
 
     robot_hist = []
-    # lm_centers_hist = []
-    # sigma_hist = []
     i = 0
     j = 0
 
@@ -615,12 +604,8 @@ def EKFSlam(rowGPS, rowOdom, rowLaser, sensorManager):
                                        theta=state[2],
                                        dt=dt,
                                        R_robot=R_x)
-
             robot_hist.append(state[:3].copy())
-            # lm_centers_hist.append([
-            #     (lm.centerx, lm.centery) for lm in landmarks.landmarks
-            # ])
-            # sigma_hist.append(sigma.copy())
+
         elif entry['sensor'] == 3:
             laser = rowLaser[entry['index']]['laser_values']
 
@@ -642,10 +627,7 @@ def EKFSlam(rowGPS, rowOdom, rowLaser, sensorManager):
             for v in Nis:
                 state_hist['NIS'].append(v)
             robot_hist.append(state[:3].copy())
-            # lm_centers_hist.append([
-            #     (lm.centerx, lm.centery) for lm in landmarks.landmarks
-            # ])
-            # sigma_hist.append(sigma.copy())
+
         elif entry['sensor'] == 1:
             gps = rowGPS[entry['index']]
             state, sigma, nis = gps_update(state, sigma, (gps['latitude'], gps['longitude']), 3)
@@ -663,7 +645,7 @@ def EKFSlam(rowGPS, rowOdom, rowLaser, sensorManager):
         cov_trees['5'] = np.vstack((cov_trees['5'], (np.diag(sigma[500:502, 500:502]) if (sigma[500,500]+sigma[501,501]) < 100 else [0,0])))
         cov_trees['t'].append(currentTime)
 
-    merge_landmarks(landmarks, pos_threshold=1, diam_threshold=0.5)
+    #merge_landmarks(landmarks, pos_threshold=1, diam_threshold=0.5)
 
     return state, np.array(robot_hist), sigma, state_hist, cov_trees
 
@@ -690,108 +672,13 @@ if __name__ == "__main__":
     np.save('NIS_history.npy', hist['NIS'])
     print("State history arrays saved to individual .npy files.")
     
-    plt.plot(allState[:,0], allState[:,1], label='EKF SLAM')
-    fig, ax = plt.subplots(figsize=(8, 8))
-    # 1) plot robot path
-    ax.plot(allState[:, 0], allState[:, 1], '-k', label='EKF Path')
+    print("Number of saved landamrks : ", len(landmarks.landmarks))
 
-    # 2) overlay landmarks + 2‑sigma ellipses
-    viz.plot_landmarks_with_cov(
-        landmarks, sigma, ax=ax,
-        n_std=2,
-        edgecolor='blue', facecolor='none', linewidth=1, alpha=0.7
-    )
-
-    ax.set_xlabel('longitude (m)')
-    ax.set_ylabel('lattitude (m)')
-    ax.set_title('SLAM Landmarks with 95% Covariance Ellipses')
-    ax.legend()
-    #ax.axis('equal')
-    print(len(landmarks.landmarks))
-
-    # final_state, robot_hist, lm_centers_hist, sigma_hist = \
-    #     EKFSlam(drsData, laserData, dataManagement)
-    #
-    # fig, ax = plt.subplots(figsize=(8, 8))
-    # ax.set_aspect('equal', 'box')
-    #
-    # # line for robot path
-    # traj_line, = ax.plot([], [], '-k', lw=1)
-    #
-    # # scatter for landmark centers
-    # land_scat = ax.scatter([], [], s=20, c='tab:blue')
-    #
-    # # store ellipse artists
-    # ellipses = []
-    #
-    # # autoscale
-    # xs = robot_hist[:, 0]
-    # ys = robot_hist[:, 1]
-    # pad = 5
-    # ax.set_xlim(xs.min() - pad, xs.max() + pad)
-    # ax.set_ylim(ys.min() - pad, ys.max() + pad)
-    #
-    #
-    # def animate(i):
-    #     # 1) robot trajectory so far
-    #     traj_line.set_data(robot_hist[:i + 1, 0], robot_hist[:i + 1, 1])
-    #
-    #     # 2) current landmark centers
-    #     centers = lm_centers_hist[i]
-    #     if centers:
-    #         land_scat.set_offsets(centers)
-    #     else:
-    #         land_scat.set_offsets([])
-    #
-    #     # 3) draw covariance ellipses at this step
-    #     #    first remove old
-    #     for e in ellipses:
-    #         e.remove()
-    #     ellipses.clear()
-    #
-    #     sigma = sigma_hist[i]
-    #     for j, (cx, cy) in enumerate(centers):
-    #         # extract 2×2 sub‑cov for landmark j
-    #         iL = 3 + 2 * j
-    #         cov = sigma[iL:iL + 2, iL:iL + 2]
-    #
-    #         # eigen‑decompose
-    #         vals, vecs = np.linalg.eigh(cov)
-    #         order = vals.argsort()[::-1]
-    #         vals, vecs = vals[order], vecs[:, order]
-    #         angle = np.degrees(np.arctan2(vecs[1, 0], vecs[0, 0]))
-    #         width, height = 2 * 2 * np.sqrt(vals)  # 2‑sigma ellipse
-    #
-    #         e = Ellipse((cx, cy), width, height, angle=angle,
-    #                     edgecolor='C1', facecolor='none', lw=1, alpha=0.6)
-    #         ax.add_patch(e)
-    #         ellipses.append(e)
-    #
-    #     return [traj_line, land_scat] + ellipses
-    #
-    #
-    # pbar = tqdm(total=len(robot_hist), desc="Saving animation")
-    #
-    #
-    # # Define callback to update the progress bar
-    # def progress_callback(frame_number, total_frames):
-    #     pbar.update(1)
-    #
-    # ani = FuncAnimation(fig, animate,
-    #                     frames=len(robot_hist),
-    #                     interval=100)
-    # ani.save("ekf.mp4", writer='ffmpeg', fps=60, dpi=200, bitrate=1800, progress_callback=progress_callback)
-    # pbar.close()
-
-    plt.savefig('foo.png')
-
+    # Final Map with covariance ellipse
+    viz.plot_Map(allState, landmarks=landmarks, sigma=sigma)
+    # Save perfromances on position estimations
     viz.plot_Perf(hist)
+    # Proceed NIS test
     viz.NIS_test(hist["NIS"])
+    # Covariance of 5 trees
     viz.plot_TreeCov(treeHist)
-
-    fig, ax = plt.subplots()
-    im = ax.imshow(sigma, cmap='viridis',      # pick any Matplotlib colormap
-           interpolation='none' # no smoothing between cells
-          )
-    fig.colorbar(im, ax=ax)
-    plt.savefig('cov.png')
