@@ -16,7 +16,7 @@ def parse_drs_data(filepath, chunk_size):
             yield {'time_vs': row.iloc[0], 'velocity': row.iloc[1], 'steering': row.iloc[2]}
 
 def parse_gps_data(filepath, chunk_size):
-    for chunk in pd.read_csv(filepath, header=None, sep="\t", chunksize=chunk_size):
+    for chunk in pd.read_csv(filepath, header=None, sep=",", chunksize=chunk_size):
         for _, row in chunk.iterrows():
             yield {'time_vs': row.iloc[0], 'latitude': row.iloc[1], 'longitude': row.iloc[2]}
 
