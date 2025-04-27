@@ -27,24 +27,22 @@ def plot_Perf(historic):
     plt.figure()
     plt.subplot(311)
     plt.plot(tps, Cov[:,0], label="Vxx")
-    plt.ylabel("temps (s)")
     plt.ylabel("Cov")
     plt.legend(loc="upper right")
 
     plt.subplot(312)
-    plt.plot(tps, Cov[:,1],  label="Vxy")
-    plt.ylabel("temps (s)")
+    plt.plot(tps, Cov[:,1],  label="Vyy")
     plt.ylabel("Cov")
     plt.legend(loc="upper right")
 
     plt.subplot(313)
-    plt.plot(tps, Cov[:,2],  label="Vyy")
-    plt.ylabel("temps (s)")
+    plt.plot(tps, Cov[:,2],  label="Vphi")
+    plt.xlabel("time step")
     plt.ylabel("Cov")
     plt.legend(loc="upper right")
 
-    plt.suptitle("Variance sur la postion")
-    plt.savefig(f"images/performances")
+    plt.suptitle("Standard deviations on postion states")
+    plt.savefig(f"images/performances.png")
     plt.close() # Close the figure to free up memory
 
 def plot_TreeCov(treesCov):
@@ -55,20 +53,20 @@ def plot_TreeCov(treesCov):
     T4 = treesCov["4"]
     T5 = treesCov["5"]
     plt.figure()
-    plt.plot(temps, T1[:,0], label="tree_50")
-    plt.plot(temps, T1[:,1])
-    plt.plot(temps, T2[:,0], label="tree_150")
-    plt.plot(temps, T2[:,1])
-    plt.plot(temps, T3[:,0], label="tree_200")
-    plt.plot(temps, T3[:,1])
-    plt.plot(temps, T4[:,0], label="tree_300")
-    plt.plot(temps, T4[:,1])
-    plt.plot(temps, T5[:,0], label="tree_500")
-    plt.plot(temps, T5[:,1])
+    plt.plot(temps, T1[:,0], label="tree_50", color="#9A0EEA")
+    plt.plot(temps, T1[:,1], color="#9A0EEA")
+    plt.plot(temps, T2[:,0], label="tree_150", color="#FE420F")
+    plt.plot(temps, T2[:,1], color="#FE420F")
+    plt.plot(temps, T3[:,0], label="tree_200", color="#FFD700")
+    plt.plot(temps, T3[:,1], color="#FFD700")
+    plt.plot(temps, T4[:,0], label="tree_300", color="#15B01A")
+    plt.plot(temps, T4[:,1], color="#15B01A")
+    plt.plot(temps, T5[:,0], label="tree_500", color="#13EAC9")
+    plt.plot(temps, T5[:,1], color="#13EAC9")
 
-    plt.title("Norme varriance sur les landmarks")
-    plt.ylabel("temps (s)")
-    plt.ylabel("deviation standard")
+    plt.title("Variances on landmarks")
+    plt.xlabel("step time")
+    plt.ylabel("standard deviation ")
     plt.legend(loc="upper right")
     plt.savefig(f"images/errDynamique")
     plt.close() # Close the figure to free up memory
@@ -91,7 +89,6 @@ def check_nis_consistency(nis_values, measurement_dimension, confidence_level=0.
   """
   degrees_of_freedom = measurement_dimension
   lower_bound = chi2.ppf((1 - confidence_level) / 2, degrees_of_freedom)
-  print(lower_bound)
   upper_bound = chi2.ppf((1 + confidence_level) / 2, degrees_of_freedom)
   within_bounds = np.logical_and(nis_values >= lower_bound, nis_values <= upper_bound)
   percentage_within_bounds = np.mean(within_bounds) * 100
@@ -132,7 +129,8 @@ def NIS_test(NIS_val):
     p1 = [0, len(nis_values)]
     p2 = [upper, upper]
     plt.plot(p1,p2)
-    plt.show()
+    plt.savefig("images/NIS_test.png")
+    plt.close()
 
 def plot_Map(state, landmarks, sigma):
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -149,6 +147,23 @@ def plot_Map(state, landmarks, sigma):
     plt.savefig('images/finalMap.png')
     plt.close()
 
+def plot_Time(timeHist):
+    
+    fig, ax = plt.subplots()
+    plt.plot(timeHist["time"], timeHist["step"])
+    plt.title("Computation time for steps")
+    plt.xlabel("step time")
+    plt.ylabel("computation time (s)")
+    
+    textstr = f"total time : {int(np.sum(timeHist["step"]))}s"
+    # these are matplotlib.patch.Patch properties
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    # place a text box in upper left in axes coords
+    ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=8,
+        verticalalignment='top', bbox=props)
+    
+    plt.savefig('images/computeTime.png')
+    plt.close()
 
 def find_circle_center_least_squares(points):
     """
@@ -355,5 +370,5 @@ def plot_landmarks_with_cov(landmarks, sigma, ax=None, n_std=2.0, **ellipse_kwar
     # pbar.close()
 
 if __name__ == "__main__":
-    loaded_nis = np.load('NIS_history.npy', allow_pickle=True)
+    loaded_nis = np.load('images/NIS_history.npy', allow_pickle=True)
     NIS_test(loaded_nis)
