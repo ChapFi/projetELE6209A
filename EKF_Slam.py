@@ -11,6 +11,7 @@ from matplotlib.animation import FuncAnimation, FFMpegWriter
 from scipy.stats import chi2
 import data_Visualisation as viz
 from scipy.stats import chi2
+import time
 
 chi = chi2.ppf(0.999, df=2)
 
@@ -317,7 +318,7 @@ def compute_data_association(state, sigma, measurements):
     n_lmark = len(landmarks.landmarks)
     n_scans = len(measurements)
     M = np.full((n_scans, n_lmark), 1e8, dtype=float)
-    Qt = np.array([[0.5**2, 0], [0, (5*np.pi/180)**2]])
+    Qt = np.array([[0.1**2, 0], [0, (1.25*np.pi/180)**2]])
 
     alpha = chi2.ppf(0.95, 2)
     beta = chi2.ppf(0.99, 2)
@@ -542,14 +543,13 @@ def updateEKF(state, sigma, measure: list[Landmark]):
 
         state, sigma, nis = update_landmark_subblock(
             state, sigma, j, (r, theta),
-            Qt= np.array([[0.5**2, 0], [0, (5*np.pi/180)**2]]) # np.array([[1**2, 0], [0, (0.01)**2]])#
+            Qt= np.array([[0.1**2, 0], [0, (1.25*np.pi/180)**2]]) # np.array([[1**2, 0], [0, (0.01)**2]])#
         )
         landmarks.landmarks[j].update(state[2*j+3:2*j+5], diam, sigma[3 + 2 * j:5 + 2 * j, 3 + 2 * j:5 + 2 * j])
         updated_covariance = sigma[3 + 2 * j:5 + 2 * j, 3 + 2 * j:5 + 2 * j]
         landmarks.landmarks[j].covariance = updated_covariance
         Nis.append(nis)
     return state, sigma, Nis
-
 
 def EKFSlam(rowGPS, rowOdom, rowLaser, sensorManager):
 
@@ -576,6 +576,11 @@ def EKFSlam(rowGPS, rowOdom, rowLaser, sensorManager):
         'cov': np.diag(sigma[0:3, 0:3])
     }
 
+    time_stat = {
+        'step':[],
+        'time':[]
+    }
+
     cov_trees = {
         't':[0],
         '1':[0, 0],
@@ -597,6 +602,7 @@ def EKFSlam(rowGPS, rowOdom, rowLaser, sensorManager):
         if entry['sensor'] == 2:
             # — Prediction step
             u = rowOdom[entry['index']]
+            start_time = time.time()
             state = g(u, state, dt, len(state))
             sigma = predict_covariance(sigma,
                                        vt=u['velocity'],
@@ -604,7 +610,10 @@ def EKFSlam(rowGPS, rowOdom, rowLaser, sensorManager):
                                        theta=state[2],
                                        dt=dt,
                                        R_robot=R_x)
+            end_time = time.time()
             robot_hist.append(state[:3].copy())
+            time_stat['time'].append(currentTime)
+            time_stat['step'].append(end_time-start_time)
 
         elif entry['sensor'] == 3:
             laser = rowLaser[entry['index']]['laser_values']
@@ -623,16 +632,24 @@ def EKFSlam(rowGPS, rowOdom, rowLaser, sensorManager):
                                   theta=ang))
 
             # now do your EKF update as before:
+            start_time = time.time()
             state, sigma, Nis = updateEKF(state, sigma, z)
+            end_time = time.time()
             for v in Nis:
                 state_hist['NIS'].append(v)
             robot_hist.append(state[:3].copy())
+            time_stat['time'].append(currentTime)
+            time_stat['step'].append(end_time-start_time)
 
         elif entry['sensor'] == 1:
             gps = rowGPS[entry['index']]
-            state, sigma, nis = gps_update(state, sigma, (gps['latitude'], gps['longitude']), 3)
+            start_time = time.time()
+            state, sigma, nis = gps_update(state, sigma, (gps['latitude'], gps['longitude']), 2.5)
+            end_time = time.time()
             if nis != None:
                 state_hist['NIS'].append(nis)
+            time_stat['time'].append(currentTime)
+            time_stat['step'].append(end_time-start_time)
 
         
         state_hist['x'] = np.vstack((state_hist['x'], state[0:3]))
@@ -647,7 +664,7 @@ def EKFSlam(rowGPS, rowOdom, rowLaser, sensorManager):
 
     #merge_landmarks(landmarks, pos_threshold=1, diam_threshold=0.5)
 
-    return state, np.array(robot_hist), sigma, state_hist, cov_trees
+    return state, np.array(robot_hist), sigma, state_hist, cov_trees, time_stat
 
 
 if __name__ == "__main__":
@@ -664,12 +681,12 @@ if __name__ == "__main__":
     # cProfile.run('EKFSlam(gpsData, drsData, laserData, dataManagement)', 'prof')
     # p = pstats.Stats('prof')
     # p.sort_stats('tottime').print_stats(10)
-    finalstate, allState, sigma, hist, treeHist = EKFSlam(gpsData, drsData, laserData, dataManagement)
+    finalstate, allState, sigma, hist, treeHist, timeHist = EKFSlam(gpsData, drsData, laserData, dataManagement)
 
-    np.save('t_history.npy',hist['t'])
-    np.save('x_history.npy', hist['x'])
-    np.save('P_history.npy', hist['cov'])
-    np.save('NIS_history.npy', hist['NIS'])
+    np.save('images/t_history.npy',hist['t'])
+    np.save('images/x_history.npy', hist['x'])
+    np.save('images/P_history.npy', hist['cov'])
+    np.save('images/NIS_history.npy', hist['NIS'])
     print("State history arrays saved to individual .npy files.")
     
     print("Number of saved landamrks : ", len(landmarks.landmarks))
@@ -682,3 +699,5 @@ if __name__ == "__main__":
     viz.NIS_test(hist["NIS"])
     # Covariance of 5 trees
     viz.plot_TreeCov(treeHist)
+    #Time performance for computation
+    viz.plot_Time(timeHist)
