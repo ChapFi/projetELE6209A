@@ -41,7 +41,7 @@ def plot_Perf(historic):
     plt.ylabel("Cov")
     plt.legend(loc="upper right")
 
-    plt.suptitle("Standard deviations on postion states")
+    plt.suptitle("Standard deviations on position states")
     plt.savefig(f"images/performances.png")
     plt.close() # Close the figure to free up memory
 
