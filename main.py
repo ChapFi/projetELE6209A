@@ -79,7 +79,7 @@ if __name__ == '__main__':
     plt.savefig('foo.png')
 
     fig, ax = plt.subplots()
-    im = ax.imshow(sigma, cmap='viridis',  # pick any Matplotlib colormap
+    im = ax.imshow(sigma[:len(slam.landmarks), :len(slam.landmarks)], cmap='viridis',  # pick any Matplotlib colormap
                    interpolation='none'  # no smoothing between cells
                    )
 
