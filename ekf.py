@@ -20,8 +20,9 @@ def calculate_nis(innovation: np.ndarray, cov: np.ndarray) -> float:
 
 
 class EKF:
-    def __init__(self, dim_state: int, R_robot: np.ndarray, Qt: np.ndarray, L=2.83, a=3.78, b=0.5, H=0.76):
+    def __init__(self, dim_state: int, R_robot: np.ndarray, Qt: np.ndarray, L=2.83, a=3.78, b=0.5, H=0.76, initial_state=np.array([-67.6493, -41.7142, 35.5 * np.pi / 180])):
         self.state = np.zeros(dim_state)
+        self.state[:3] = initial_state
         self.sigma = np.eye(dim_state) * 1e6
         self.R_robot = R_robot
         self.Qt = Qt
