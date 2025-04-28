@@ -216,7 +216,7 @@ def g(mesureT, estimatet1,dt, N):
     Fx = np.zeros((N, 3))
     Fx[0:3,0:3] = np.eye(3)
     newmu = estimatet1 + Fx @ Dmu
-    newmu[3] = normalize_angle(newmu[3])
+    newmu[2] = normalize_angle(newmu[2])
     return newmu
 
 def predict_covariance(sigma, vt, alpha, theta, dt, R_robot):
@@ -320,8 +320,8 @@ def compute_data_association(state, sigma, measurements):
     M = np.full((n_scans, n_lmark), 1e8, dtype=float)
     Qt = np.array([[0.1**2, 0], [0, (1.25*np.pi/180)**2]])
 
-    alpha = chi2.ppf(0.95, 2)
-    beta = chi2.ppf(0.99, 2)
+    alpha = chi2.ppf(0.99, 2)
+    beta = chi2.ppf(0.999, 2)
     A = alpha * np.ones((n_scans, n_scans))
 
     for j in range(n_lmark):
@@ -644,7 +644,7 @@ def EKFSlam(rowGPS, rowOdom, rowLaser, sensorManager):
         elif entry['sensor'] == 1:
             gps = rowGPS[entry['index']]
             start_time = time.time()
-            state, sigma, nis = gps_update(state, sigma, (gps['latitude'], gps['longitude']), 2.5)
+            state, sigma, nis = gps_update(state, sigma, (gps['longitude'], gps['latitude']), 2.5)
             end_time = time.time()
             if nis != None:
                 state_hist['NIS'].append(nis)
@@ -673,7 +673,7 @@ if __name__ == "__main__":
     dataManagement = parse_sensor_management("dataset/Sensors_manager.txt")
     laserData = LazyData('dataset/LASER_processed.txt', "laser")
     drsData = LazyData('dataset/DRS.txt', "drs")
-    gpsData = LazyData('dataset/GPS.txt', 'gps')
+    gpsData = LazyData('dataset/GPS2.txt', 'gps')
     #viz.displayRowData(drsData, laserData, dataManagement)
 
     # import cProfile, pstats
