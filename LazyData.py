@@ -16,9 +16,15 @@ def parse_drs_data(filepath, chunk_size):
             yield {'time_vs': row.iloc[0], 'velocity': row.iloc[1], 'steering': row.iloc[2]}
 
 def parse_gps_data(filepath, chunk_size):
-    for chunk in pd.read_csv(filepath, header=None, sep=",", chunksize=chunk_size):
+    for chunk in pd.read_csv(filepath, header=None, sep="\t", chunksize=chunk_size):
         for _, row in chunk.iterrows():
-            yield {'time_vs': row.iloc[0], 'latitude': row.iloc[1], 'longitude': row.iloc[2]}
+            yield {'time_vs': row.iloc[0], 'latitude': row.iloc[1]*2*np.pi*3678/360, 'longitude': row.iloc[2]*2*np.pi*3678/180}
+
+def parse_manager_data(filepath, chunk_size):
+    for chunk in pd.read_csv(filepath, header=None, sep="\t", chunksize=chunk_size):
+        for _, row in chunk.iterrows():
+            yield {'time': row.iloc[0], 'sensor': row.iloc[1], 'index': int(row.iloc[2])}
+
 
 class LazyData:
     def __init__(self, filepath, data, chunk_size=100):
@@ -37,6 +43,8 @@ class LazyData:
             self._generator = parse_drs_data(filepath, chunk_size)
         elif data == 'gps':
             self._generator = parse_gps_data(filepath, chunk_size)
+        elif data == 'manager':
+            self._generator = parse_manager_data(filepath, chunk_size)
         else:
             raise ValueError(f"Invalid data type: {data}")
 
@@ -75,3 +83,16 @@ class LazyData:
             del f
             self._len = num_newlines
         return self._len
+
+    def __iter__(self):
+        # start iteration at first element
+        self._iter_idx = 1
+        return self
+
+    def __next__(self):
+        # fetch next element or stop
+        if self._iter_idx > len(self):
+            raise StopIteration
+        item = self[self._iter_idx]
+        self._iter_idx += 1
+        return item

@@ -40,3 +40,6 @@ class Landmarks:
 
     def __iter__(self):
         return iter(self.landmarks)
+
+    def __len__(self):
+        return len(self.landmarks)
