@@ -34,7 +34,7 @@ class SLAM:
             elif entry['sensor'] == 2:
                 # — Prediction step
                 u = self.odom_data[entry['index']]
-                state = self.ekf.predict(u, dt)
+                self.ekf.predict(u, dt)
 
             elif entry['sensor'] == 3:
                 laser = self.laser_data[entry['index']]['laser_values']

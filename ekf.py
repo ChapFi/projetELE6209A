@@ -30,6 +30,7 @@ class EKF:
         self.a = a
         self.b = b
         self.H = H
+        self.sigma[:3, :3] = np.diag([.1, .1, 1])
 
     def predict(self, control: dict, dt: float):
         # Propagate state
@@ -73,19 +74,19 @@ class EKF:
 
     def update_gps(self, gps_xy: tuple[float,float], sigma_gps: float, gate_prob: float = 0.999):
         # GPS-only update on x,y
-        Pxx = self.sigma[:2, :2]
+        Pxy = self.sigma[:2, :2]
         P0 = self.sigma[:, :2]
         res = np.array(gps_xy) - self.state[:2]
         R = np.eye(2) * sigma_gps**2
-        S = Pxx + R
+        S = Pxy + R
         v = res.T @ np.linalg.inv(S) @ res
         if v > chi2.ppf(gate_prob, df=2):
-            return None
+            return
         K = P0 @ np.linalg.inv(S)
         self.state += K @ res
         self.state[2] = normalize_angle(self.state[2])
         self.sigma -= K @ P0.T
-        return v
+
 
     def update_landmark(self, j: int, meas: tuple[float,float]):
         # Single landmark EKF update on indices [0,1,2,3+2j,4+2j]
