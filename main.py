@@ -50,7 +50,7 @@ if __name__ == '__main__':
     Qt = np.array([[0.1**2,0],[0,(1.25*np.pi/180)**2]])
 
     slam = SLAM(
-        gps_parser=LazyData('dataset/GPS2.txt', "gps"),
+        gps_parser=LazyData('dataset/GPS.txt', "gps"),
         odom_parser=LazyData('dataset/DRS.txt', "drs"),
         laser_parser=LazyData('dataset/LASER_processed.txt', "laser"),
         sensor_parser=LazyData('dataset/Sensors_manager.txt', "manager"),
