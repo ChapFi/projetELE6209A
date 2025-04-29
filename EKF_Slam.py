@@ -499,7 +499,7 @@ def extendedKalman(state, u, sigma, measure, dt):
     currentTime = currentTime + dt
     newState = g(u, state, dt, N)
     # Define your robot process noise once, e.g.
-    R_x = np.diag([0.15 ** 2, 0.15 ** 2, (0.5*np.pi/ 180) ** 2])# np.diag([0.05 ** 2, 0.05 ** 2, (0.5 * np.pi / 180) ** 2])#
+    R_x = np.diag([0.2** 2, 0.2** 2, (0.4*np.pi/ 180) ** 2])# np.diag([0.05 ** 2, 0.05 ** 2, (0.5 * np.pi / 180) ** 2])#
 
     # … inside your EKF predict …
     newSigma = predict_covariance(sigma,
@@ -556,14 +556,14 @@ def EKFSlam(rowGPS, rowOdom, rowLaser, sensorManager):
     #Initiale state
     nbLandmark = 1500
     X = np.zeros(3+2*nbLandmark)
-    X[0] = -67.6493   
-    X[1] = -41.7142 
+    X[0] = 0#-67.6493   
+    X[1] = 0#-41.7142 
     X[2] = 35.5*np.pi/180
     state = X
     sigma = np.eye(3+2*nbLandmark)*1e6
     sigma[0:3, 0:3] = np.diag([.1, .1, 1])
     currentTime = 0
-    R_x = np.diag([0.15** 2, 0.15** 2, (0.5*np.pi/ 180) ** 2])# np.diag([0.05 ** 2, 0.05 ** 2, (0.5 * np.pi / 180) ** 2])#
+    R_x = np.diag([0.2** 2, 0.2** 2, (0.4*np.pi/ 180) ** 2])# np.diag([0.05 ** 2, 0.05 ** 2, (0.5 * np.pi / 180) ** 2])#
 
     robot_hist = []
     i = 0
@@ -651,7 +651,6 @@ def EKFSlam(rowGPS, rowOdom, rowLaser, sensorManager):
             time_stat['time'].append(currentTime)
             time_stat['step'].append(end_time-start_time)
 
-        
         state_hist['x'] = np.vstack((state_hist['x'], state[0:3]))
         state_hist['cov'] = np.vstack((state_hist['cov'],np.diag(sigma[0:3, 0:3])))
         state_hist['t'].append(currentTime)

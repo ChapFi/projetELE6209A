@@ -16,7 +16,10 @@ def visualize_trajectorie(posMat, id):
         plt.plot(posMat[0], posMat[1])
     else:
         plt.plot(posMat[:,0], posMat[:,1])
-    plt.title('Map')
+    plt.title('SLAM path')
+    plt.xlabel("longitude (m)")
+    plt.ylabel("latitude (m)")
+    plt.grid("on")
     plt.savefig(f"images/map/{id}")
     plt.close() # Close the figure to free up memory
 
@@ -121,14 +124,21 @@ def NIS_test(NIS_val):
         else:
             print("Average NIS suggests consistency.")
 
-    plt.figure()
-    plt.plot(nis_values)
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.plot(nis_values)
     p1 = [0, len(nis_values)]
     p2 = [lower, lower]
-    plt.plot(p1,p2)
+    ax.plot(p1,p2)
     p1 = [0, len(nis_values)]
     p2 = [upper, upper]
-    plt.plot(p1,p2)
+    ax.plot(p1,p2)
+    textstr = f"percent in bounds: {percentage:.2f}%"
+    # these are matplotlib.patch.Patch properties
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    # place a text box in upper left in axes coords
+    ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=8,
+        verticalalignment='top', bbox=props)
+    plt.title('NIS test with 0.95 confidence level')
     plt.savefig("images/NIS_test.png")
     plt.close()
 
